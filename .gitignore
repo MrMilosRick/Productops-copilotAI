@@ -21,3 +21,27 @@ media/
 
 # OS
 .DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Django
+*.sqlite3
+staticfiles/
+media/
+
+# OS/IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Env
+.env
