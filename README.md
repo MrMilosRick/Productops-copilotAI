@@ -1,14 +1,12 @@
-# ProductOps Copilot (MVP)
+# ProductOps Copilot AI
 
-Django + DRF + Postgres(pgvector) + Redis + Celery.
+Django + Postgres (pgvector) + Redis + Celery.  
+Local dev runs via Docker Compose.
 
-## Run
-1) Copy env
-   cp .env.example .env
+## Quick start
 
-2) Start
-   cd infra
-   docker compose up --build
-
-3) Check
-   http://localhost:8000/api/health/
+```bash
+cd infra
+docker compose up -d --build
+curl -s http://localhost:8001/api/health/ && echo
+```
