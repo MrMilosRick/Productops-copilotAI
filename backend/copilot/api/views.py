@@ -1,0 +1,227 @@
+import hashlib
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+
+from copilot.models import Workspace, KnowledgeSource, Document, AgentRun, AgentStep, IdempotencyKey
+from copilot.api.serializers import (
+    UploadTextSerializer,
+    DocumentSerializer,
+    AskSerializer,
+    AgentRunSerializer,
+    AgentRunDetailSerializer,
+    AgentStepSerializer,
+)
+from copilot.tasks.ingestion import chunk_document
+from copilot.services.retriever import keyword_retrieve
+from copilot.services.idempotency import normalize_idempotency_key
+
+@api_view(["GET"])
+def health(request):
+    return Response({"status": "ok"})
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+def request_hash(question: str, mode: str) -> str:
+    payload = f"{mode}|{question}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+def get_or_create_default_workspace() -> Workspace:
+    ws, _ = Workspace.objects.get_or_create(name="default")
+    return ws
+
+def get_or_create_upload_source(ws: Workspace) -> KnowledgeSource:
+    src, _ = KnowledgeSource.objects.get_or_create(workspace=ws, kind="upload", name="uploads")
+    return src
+
+# --------------------
+# KB endpoints
+# --------------------
+
+@api_view(["POST"])
+def kb_upload_text(request):
+    ser = UploadTextSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    title = ser.validated_data["title"]
+    content = ser.validated_data["content"]
+
+    ws = get_or_create_default_workspace()
+    src = get_or_create_upload_source(ws)
+
+    doc = Document.objects.create(
+        workspace=ws,
+        source=src,
+        title=title,
+        filename="",
+        mime="text/plain",
+        content=content,
+        content_hash=sha256_text(content),
+        status="uploaded",
+    )
+
+    chunk_document.delay(doc.id)
+
+    return Response({"document_id": doc.id, "status": "uploaded", "queued": True}, status=status.HTTP_201_CREATED)
+
+@api_view(["GET"])
+def kb_documents(request):
+    ws = get_or_create_default_workspace()
+    qs = Document.objects.filter(workspace=ws).order_by("-id")[:50]
+    return Response(DocumentSerializer(qs, many=True).data)
+
+@api_view(["GET"])
+def kb_document_detail(request, document_id: int):
+    ws = get_or_create_default_workspace()
+    doc = Document.objects.get(workspace=ws, id=document_id)
+    return Response({
+        "id": doc.id,
+        "title": doc.title,
+        "status": doc.status,
+        "chunk_count": doc.chunk_count,
+        "created_at": doc.created_at,
+        "content_preview": doc.content[:500],
+    })
+
+# --------------------
+# Copilot "ask" (MVP without LLM) + Idempotency v2
+# --------------------
+
+def build_answer_from_retrieved(retrieved):
+    answer_lines = ["Found relevant context in KB:"]
+    for i, r in enumerate(retrieved, start=1):
+        answer_lines.append(f"{i}. [{r['document_title']}] {r['snippet']}")
+    return "\n\n".join(answer_lines)
+
+def get_sources_from_run(run: AgentRun):
+    step = run.steps.filter(name="retrieve_context").order_by("-id").first()
+    if not step:
+        return []
+    out = step.output_json or {}
+    return out.get("results", []) or []
+
+@api_view(["POST"])
+def ask(request):
+    ser = AskSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    question = ser.validated_data["question"]
+    mode = ser.validated_data["mode"]
+
+    ws = get_or_create_default_workspace()
+
+    raw_key = request.headers.get("Idempotency-Key", "")
+    idem_key = normalize_idempotency_key(raw_key)
+    r_hash = request_hash(question, mode)
+
+    # 1) Replay path
+    if idem_key:
+        existing = IdempotencyKey.objects.filter(key=idem_key).first()
+        if existing:
+            # protect against accidental reuse with different request
+            if existing.request_hash != r_hash:
+                return Response(
+                    {
+                        "error": "Idempotency-Key already used for a different request",
+                        "idempotency_key": idem_key,
+                    },
+                    status=409,
+                )
+            if existing.run_id:
+                run = AgentRun.objects.get(id=existing.run_id)
+                sources = get_sources_from_run(run)
+                return Response({
+                    "run_id": run.id,
+                    "answer": run.final_output or "",
+                    "sources": sources,
+                    "idempotent_replay": True,
+                })
+
+    # 2) Create run (new execution)
+    run = AgentRun.objects.create(
+        workspace=ws,
+        user=None,
+        question=question,
+        mode=mode,
+        status="running",
+    )
+
+    # store idempotency record mapped to this run
+    if idem_key:
+        IdempotencyKey.objects.update_or_create(
+            key=idem_key,
+            defaults={
+                "workspace": ws,
+                "request_hash": r_hash,
+                "run": run,
+            },
+        )
+
+    try:
+        retrieved = keyword_retrieve(ws.id, question, top_k=5)
+
+        AgentStep.objects.create(
+            run=run,
+            name="retrieve_context",
+            input_json={"question": question, "top_k": 5},
+            output_json={"results": retrieved},
+            status="ok",
+        )
+
+        if not retrieved:
+            run.status = "success"
+            run.final_output = (
+                "I couldn't find relevant knowledge in the KB for this question.\n"
+                "Try uploading more docs or rephrasing the query."
+            )
+            run.save(update_fields=["status", "final_output"])
+            return Response({
+                "run_id": run.id,
+                "answer": run.final_output,
+                "sources": [],
+            })
+
+        run.status = "success"
+        run.final_output = build_answer_from_retrieved(retrieved)
+        run.save(update_fields=["status", "final_output"])
+
+        return Response({
+            "run_id": run.id,
+            "answer": run.final_output,
+            "sources": retrieved,
+        })
+
+    except Exception as e:
+        AgentStep.objects.create(
+            run=run,
+            name="retrieve_context",
+            input_json={"question": question},
+            output_json={"error": str(e)},
+            status="error",
+        )
+        run.status = "error"
+        run.error = str(e)
+        run.save(update_fields=["status", "error"])
+        return Response({"run_id": run.id, "error": str(e)}, status=500)
+
+# --------------------
+# Traces API
+# --------------------
+
+@api_view(["GET"])
+def runs_list(request):
+    ws = get_or_create_default_workspace()
+    qs = AgentRun.objects.filter(workspace=ws).order_by("-id")[:50]
+    return Response(AgentRunSerializer(qs, many=True).data)
+
+@api_view(["GET"])
+def run_detail(request, run_id: int):
+    ws = get_or_create_default_workspace()
+    run = AgentRun.objects.get(workspace=ws, id=run_id)
+    return Response(AgentRunDetailSerializer(run).data)
+
+@api_view(["GET"])
+def run_steps(request, run_id: int):
+    ws = get_or_create_default_workspace()
+    run = AgentRun.objects.get(workspace=ws, id=run_id)
+    steps = run.steps.order_by("id")
+    return Response(AgentStepSerializer(steps, many=True).data)
