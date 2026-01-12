@@ -45,3 +45,6 @@ media/
 
 # Env
 .env
+
+# backups
+*.bak
