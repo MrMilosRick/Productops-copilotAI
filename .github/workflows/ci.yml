@@ -1,3 +1,4 @@
+name: CI
 
 on:
   push:
@@ -17,6 +18,20 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Create .env for CI
+        run: |
+          cat > .env <<'EOF'
+          DJANGO_SECRET_KEY=ci-secret
+          DJANGO_DEBUG=0
+          DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+          DATABASE_URL=postgres://copilot:copilot@db:5432/copilot
+          REDIS_URL=redis://redis:6379/0
+          CELERY_BROKER_URL=redis://redis:6379/0
+          CELERY_RESULT_BACKEND=redis://redis:6379/0
+          EMBEDDINGS_BACKEND=fake
+          LLM_BACKEND=fake
+          EOF
 
       - name: Run make ci
         run: make ci
