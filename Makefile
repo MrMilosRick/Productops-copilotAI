@@ -7,8 +7,8 @@ help:
 	@echo "  make logs      - tail logs"
 	@echo "  make wait      - wait until /api/health/ is ready"
 	@echo "  make health    - print /api/health/"
-	@echo "  make demo      - upload demo doc + list docs
-	@echo "  make demo-clean - delete demo docs from DB""
+	@echo "  make demo      - upload demo doc + list docs"
+	@echo "  make demo-clean - delete demo docs from DB"
 	@echo "  make psql      - open psql inside db"
 
 up:
@@ -38,18 +38,20 @@ health: wait
 	@cd infra && docker compose exec -T web curl -fsS http://localhost:8000/api/health/ && echo
 
 demo: wait
-	@cd infra && docker compose exec -T web curl -fsS -X POST "http://localhost:8000/api/kb/upload_text/" \
+	curl -s -X POST "http://localhost:8001/api/kb/upload_text/" \
 	  -H "Content-Type: application/json" \
 	  -d "{\"title\":\"Demo Doc $$(date +%s)-$$$$\",\"content\":\"Hello world. This is a demo document for chunking.\"}" && echo
-	@sleep 1
-	@cd infra && docker compose exec -T web curl -fsS "http://localhost:8000/api/kb/documents/" && echo
-psql:
-	cd infra && docker compose exec db psql -U copilot -d copilot
-reset:
-	cd infra && docker compose down -v
-fresh: reset up demo
+	sleep 1
+	@curl -s "http://localhost:8001/api/kb/documents/" && echo
 
-all: fresh
+demo-list: wait
+	@curl -s "http://localhost:8001/api/kb/documents/" && echo
+
+demo-clean: wait
+	@echo "Deleting demo docs..."
+	@cd infra && docker compose exec -T db psql -U copilot -d copilot -v ON_ERROR_STOP=1 -c "DELETE FROM copilot_embeddingchunk WHERE document_id IN (SELECT id FROM copilot_document WHERE title LIKE 'Demo Doc %');"
+	@cd infra && docker compose exec -T db psql -U copilot -d copilot -v ON_ERROR_STOP=1 -c "DELETE FROM copilot_document WHERE title LIKE 'Demo Doc %';"
+	@echo "OK"
 
 smoke: fresh
 	@echo "SMOKE: DB counts"
@@ -59,13 +61,9 @@ smoke: fresh
 	@cd infra && docker compose logs --no-color --tail=200 worker | egrep "succeeded.*document_id.: 1" >/dev/null
 	@echo "OK: smoke passed"
 
-ci-up:
-	cd infra && docker compose up -d --build
+reset:
+	cd infra && docker compose down -v
 
-ci: ci-up health demo
-demo-clean: wait
-	@echo "Deleting demo docs..."
-	@cd infra && docker compose exec -T db psql -U copilot -d copilot -Atc \
-	  "delete from copilot_document where title like 'Demo Doc %';" >/dev/null
-	@echo "OK"
+fresh: reset up demo
 
+all: fresh
