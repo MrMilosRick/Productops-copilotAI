@@ -35,7 +35,7 @@ health: wait
 demo: wait
 	curl -s -X POST "http://localhost:8001/api/kb/upload_text/" \
 	  -H "Content-Type: application/json" \
-	  -d "{\"title\":\"Demo Doc $(shell date +%s)\",\"content\":\"Hello world. This is a demo document for chunking.\"}" && echo
+	  -d "{\"title\":\"Demo Doc $$(date +%s)-$$$$\",\"content\":\"Hello world. This is a demo document for chunking.\"}" && echo
 	sleep 1
 	curl -s "http://localhost:8001/api/kb/documents/" && echo
 
