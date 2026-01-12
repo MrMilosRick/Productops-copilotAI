@@ -54,24 +54,25 @@ demo: wait
 demo-list: wait
 	@cd infra && docker compose exec -T web curl -fsS "http://localhost:8000/api/kb/documents/" && echo
 
-# FK без CASCADE: сначала chunks, потом docs
+# Deletes Demo docs correctly: delete chunks first, then documents (FK without CASCADE)
 demo-clean: wait
 	@echo "Deleting demo docs..."
-	@cd infra && docker compose exec -T db sh -lc 'psql -U copilot -d copilot -v ON_ERROR_STOP=1 -c "WITH d AS (SELECT id FROM copilot_document WHERE title LIKE ''Demo Doc %'') DELETE FROM copilot_embeddingchunk c USING d WHERE c.document_id=d.id;"'
-	@cd infra && docker compose exec -T db sh -lc 'psql -U copilot -d copilot -v ON_ERROR_STOP=1 -c "DELETE FROM copilot_document WHERE title LIKE ''Demo Doc %'';"'
+	@cd infra && docker compose exec -T db sh -lc 'psql -U copilot -d copilot -v ON_ERROR_STOP=1 -Atc "WITH d AS (SELECT id FROM copilot_document WHERE title LIKE '\''Demo Doc %'\'') DELETE FROM copilot_embeddingchunk WHERE document_id IN (SELECT id FROM d); SELECT '\''DELETE '\'' || COUNT(*) FROM d; DELETE FROM copilot_document WHERE title LIKE '\''Demo Doc %'\'';"'
 	@echo "OK"
 
 psql:
-	cd infra && docker compose exec db sh -lc 'psql -U copilot -d copilot'
+	cd infra && docker compose exec db psql -U copilot -d copilot
 
 reset:
 	cd infra && docker compose down -v
 
 fresh: reset up demo
 
+all: fresh
+
 smoke: fresh
 	@echo "SMOKE: DB counts"
-	@cd infra && docker compose-lc 'psql -U copilot -d copilot -Atc "select count(*) from copilot_document;"' | grep -qx "1"
+	@cd infra && docker compose exec -T db sh -lc 'psql -U copilot -d copilot -Atc "select count(*) from copilot_document;"' | grep -qx "1"
 	@cd infra && docker compose exec -T db sh -lc 'psql -U copilot -d copilot -Atc "select count(*) from copilot_embeddingchunk where document_id=1;"' | grep -qx "1"
 	@echo "SMOKE: worker succeeded doc=1"
 	@cd infra && docker compose logs --no-color --tail=200 worker | egrep "succeeded.*document_id.: 1" >/dev/null
