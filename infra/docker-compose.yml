@@ -21,6 +21,12 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ../.env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-copilot}
+      POSTGRES_USER: ${POSTGRES_USER:-copilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-copilot}
+      POSTGRES_HOST: ${POSTGRES_HOST:-db}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
     depends_on:
       - db
       - redis
@@ -31,7 +37,7 @@ services:
       bash -lc "
       echo 'Waiting for DB...' &&
       for i in {1..60}; do
-        python -c 'import os, psycopg; host=os.getenv(\"POSTGRES_HOST\",\"db\"); port=int(os.getenv(\"POSTGRES_PORT\",\"5432\")); db=os.getenv(\"POSTGRES_DB\",\"copilot\"); user=os.getenv(\"POSTGRES_USER\",\"copilot\"); pw=os.getenv(\"POSTGRES_PASSWORD\",\"copilot\"); psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw, connect_timeout=2).close(); print(\"DB ready\")' && break || true
+        python -c \"import os, psycopg; host=os.getenv('POSTGRES_HOST','db'); port=int(os.getenv('POSTGRES_PORT','5432')); db=os.getenv('POSTGRES_DB','copilot'); user=os.getenv('POSTGRES_USER','copilot'); pw=os.getenv('POSTGRES_PASSWORD','copilot'); psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw, connect_timeout=2).close(); print('DB ready')\" && break || true
         echo '...still waiting' && sleep 1
       done &&
       python manage.py migrate &&
@@ -44,6 +50,12 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ../.env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-copilot}
+      POSTGRES_USER: ${POSTGRES_USER:-copilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-copilot}
+      POSTGRES_HOST: ${POSTGRES_HOST:-db}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
     depends_on:
       - db
       - redis
