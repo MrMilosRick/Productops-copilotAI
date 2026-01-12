@@ -21,7 +21,7 @@ logs:
 
 wait:
 	@echo "Waiting for web..."
-	@for i in $$(seq 1 30); do \
+	@for i in $$(seq 1 120); do \
 	  curl --connect-timeout 1 --max-time 2 -fsS http://localhost:8001/api/health/ >/dev/null 2>&1 && echo "OK" && exit 0; \
 	  echo "  ... ($$i)"; \
 	  sleep 1; \

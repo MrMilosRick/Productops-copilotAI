@@ -2,7 +2,7 @@ name: Nightly Smoke
 
 on:
   schedule:
-    - cron: "0 2 * * *"   # ежедневно 02:00 UTC
+    - cron: "0 2 * * *" # daily 02:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -17,17 +17,17 @@ jobs:
 
       - name: Create .env for CI
         run: |
-          cat > .env <<'EOF'
-          DJANGO_SECRET_KEY=ci-secret
-          DJANGO_DEBUG=0
-          DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
-          DATABASE_URL=postgres://copilot:copilot@db:5432/copilot
-          REDIS_URL=redis://redis:6379/0
-          CELERY_BROKER_URL=redis://redis:6379/0
-          CELERY_RESULT_BACKEND=redis://redis:6379/0
-          EMBEDDINGS_BACKEND=fake
-          LLM_BACKEND=fake
-          EOF
+          printf '%s\n' \
+            'DJANGO_SECRET_KEY=ci-secret' \
+            'DJANGO_DEBUG=0' \
+            'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1' \
+            'DATABASE_URL=postgres://copilot:copilot@db:5432/copilot' \
+            'REDIS_URL=redis://redis:6379/0' \
+            'CELERY_BROKER_URL=redis://redis:6379/0' \
+            'CELERY_RESULT_BACKEND=redis://redis:6379/0' \
+            'EMBEDDINGS_BACKEND=fake' \
+            'LLM_BACKEND=fake' \
+            > .env
 
       - name: Run smoke
         run: make smoke
@@ -36,8 +36,8 @@ jobs:
         if: failure()
         run: |
           cd infra
-          docker compose ps
-      r compose logs --no-color --tail=400 web worker db redis || true
+          docker compose ps || true
+          docker compose logs --no-color --tail=400 web worker db redis || true
 
       - name: Cleanup
         if: always()
