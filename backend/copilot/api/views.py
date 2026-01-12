@@ -12,7 +12,7 @@ from copilot.api.serializers import (
     AgentRunDetailSerializer,
     AgentStepSerializer,
 )
-from copilot.tasks.ingestion import chunk_document
+from copilot.tasks import process_document
 from copilot.services.retriever import keyword_retrieve
 from copilot.services.idempotency import normalize_idempotency_key
 
@@ -60,7 +60,6 @@ def kb_upload_text(request):
         status="uploaded",
     )
 
-    chunk_document.delay(doc.id)
 
     return Response({"document_id": doc.id, "status": "uploaded", "queued": True}, status=status.HTTP_201_CREATED)
 
