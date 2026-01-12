@@ -54,3 +54,8 @@ smoke: fresh
 	@echo "SMOKE: worker succeeded doc=1"
 	@cd infra && docker compose logs --no-color --tail=200 worker | egrep "succeeded.*document_id.: 1" >/dev/null
 	@echo "OK: smoke passed"
+
+ci-up:
+	cd infra && docker compose up -d --build
+
+ci: ci-up health demo
