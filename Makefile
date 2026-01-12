@@ -43,4 +43,5 @@ psql:
 	cd infra && docker compose exec db psql -U copilot -d copilot
 reset:
 	cd infra && docker compose down -v
+fresh: reset up demo
 
