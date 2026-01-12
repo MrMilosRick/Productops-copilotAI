@@ -45,5 +45,5 @@ reset:
 	cd infra && docker compose down -v
 fresh: reset up demo
 
-all: up health demo
+all: fresh
 
