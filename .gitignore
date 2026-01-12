@@ -48,3 +48,6 @@ media/
 
 # backups
 *.bak
+
+# local backups
+Makefile.bak.*
