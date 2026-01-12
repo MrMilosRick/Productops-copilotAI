@@ -5,7 +5,7 @@ help:
 	@echo "  make up         - build+start docker compose"
 	@echo "  make down       - stop"
 	@echo "  make logs       - tail logs"
-	@echo "  make wait       - wait until /api/health/ is ready"
+	@echo "  make wait       - wait until /api/health/ is ready (CI-safe)"
 	@echo "  make health     - print /api/health/"
 	@echo "  make demo       - upload demo doc + list docs"
 	@echo "  make demo-list  - list docs"
@@ -26,35 +26,28 @@ down:
 logs:
 	cd infra && docker compose logs -f --tail=200 web worker
 
+# CI-safe: health check runs INSIDE web container (no dependency on host ports)
 wait:
 	@echo "Waiting for web..."
-	@for i in $$(seq 1 120); do \
-	  if curl --connect-timeout 1 --max-time 2 -fsS http://localhost:8001/api/health/ >/dev/null 2>&1; then \
-	    echo "OK"; exit 0; \
-	  fi; \
-	  echo "  ... ($$i)"; \
-	  sleep 1; \
-	done; \
-	 echo "ERROR: web not ready"; \
-	 exit 1
+	@cd infra && bash -lc 'for i in $$(seq 1 120); do 	  if docker compose exec -T web curl --connect-timeout 1 --max-time 2 -fsS http://localhost:8000/api/health/ >/dev/null 2>&1; then 	    echo "OK"; exit 0; 	  fi; 	  echo "  ... ($$i)"; 	  sleep 1; 	done; 	echo "ERROR: web not ready"; 	docker compose ps || true; 	docker compose logs --no-color --tail=200 web db redis worker || true; 	exit 1'
 
 health: wait
-	@curl -s http://localhost:8001/api/health/ && echo
+	@cd infra && docker compose exec -T web curl -fsS http://localhost:8000/api/health/ && echo
 
 demo: wait
-	@curl -s -X POST "http://localhost:8001/api/kb/upload_text/" \
+	@cd infra && docker compose exec -T web curl -fsS -X POST "http://localhost:8000/api/kb/upload_text/" \
 	  -H "Content-Type: application/json" \
 	  -d "{\"title\":\"Demo Doc $$(date +%s)-$$$$\",\"content\":\"Hello world. This is a demo document for chunking.\"}" && echo
 	@sleep 1
-	@curl -s "http://localhost:8001/api/kb/documents/" && echo
+	@$(MAKE) demo-list
 
 demo-list: wait
-	@curl -s "http://localhost:8001/api/kb/documents/" && echo
+	@cd infra && docker compose exec -T web curl -fsS "http://localhost:8000/api/kb/documents/" && echo
 
+# Delete demo docs safely: first chunks then documents (no % in SQL; avoids pattern-rule weirdness)
 demo-clean: wait
 	@echo "Deleting demo docs..."
-	@cd infra && docker compose exec -T db psql -U copilot -d copilot -Atc "WITH d AS (SELECT id FROM copilot_document WHERE title LIKE 'Demo Doc %') DELETE FROM copilot_embeddingchunk WHERE document_id IN (SELECT id FROM d);"
-	@cd infra && docker compose exec -T db psql -U copilot -d copilot -Atc "DELETE FROM copilot_document WHERE title LIKE 'Demo Doc %';"
+	@cd infra && docker compose exec -T db psql -U copilot -d copilot -v ON_ERROR_STOP=1 -Atc "WITH d AS (SELECT id FROM copilot_document WHERE left(title,9)='Demo Doc '), c AS (DELETE FROM copilot_embeddingchunk WHERE document_id IN (SELECT id FROM d) RETURNING 1), dd AS (DELETE FROM copilot_document WHERE id IN (SELECT id FROM d) RETURNING 1) SELECT 'chunks_deleted='||(SELECT count(*) FROM c)||' docs_deleted='||(SELECT count(*) FROM dd);"
 	@echo "OK"
 
 psql:
@@ -64,8 +57,6 @@ reset:
 	cd infra && docker compose down -v
 
 fresh: reset up demo
-
-all: fresh
 
 smoke: fresh
 	@echo "SMOKE: DB counts"
@@ -79,4 +70,3 @@ ci-up:
 	cd infra && docker compose up -d --build
 
 ci: ci-up health demo
-
