@@ -1,4 +1,3 @@
-# (вставь сюда ci.yml)name: CI
 
 on:
   push:
