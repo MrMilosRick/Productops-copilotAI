@@ -47,3 +47,10 @@ fresh: reset up demo
 
 all: fresh
 
+smoke: fresh
+	@echo "SMOKE: DB counts"
+	@cd infra && docker compose exec -T db psql -U copilot -d copilot -Atc "select count(*) from copilot_document;" | grep -qx "1"
+	@cd infra && docker compose exec -T db psql -U copilot -d copilot -Atc "select count(*) from copilot_embeddingchunk where document_id=1;" | grep -qx "1"
+	@echo "SMOKE: worker succeeded doc=1"
+	@cd infra && docker compose logs --no-color --tail=200 worker | egrep "succeeded.*document_id.: 1" >/dev/null
+	@echo "OK: smoke passed"
