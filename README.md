@@ -9,4 +9,3 @@ Local dev runs via Docker Compose.
 cd infra
 docker compose up -d --build
 curl -s http://localhost:8001/api/health/ && echo
-```
