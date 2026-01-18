@@ -6,5 +6,5 @@ class CopilotConfig(AppConfig):
     name = "copilot"
 
     def ready(self):
-        # noqa: F401
-        import copilot.signals
+        # Signals disabled: enqueue is explicit in API (kb_upload_text)
+        pass

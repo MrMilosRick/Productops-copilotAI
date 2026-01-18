@@ -66,5 +66,5 @@ def process_document(self, document_id: int) -> dict:
         return {"document_id": doc.id, "status": doc.status, "chunks": doc.chunk_count}
 
     except Exception:
-        Document.objects.filter(id=document_id).update(status="error")
+        Document.objects.filter(id=document_id).update(status="failed")
         raise

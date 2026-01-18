@@ -31,7 +31,7 @@ class Document(models.Model):
     content = models.TextField()
     content_hash = models.CharField(max_length=64, db_index=True)
 
-    status = models.CharField(max_length=32, default="uploaded")  # uploaded/chunked/embedded/failed
+    status = models.CharField(max_length=32, default="uploaded")  # uploaded/chunking/embedded/failed
     chunk_count = models.IntegerField(default=0)
 
     created_at = models.DateTimeField(auto_now_add=True)
