@@ -15,5 +15,14 @@ jobs:
 
       - name: Run smoke
         run: |
-          cd infra
-          make smoke
+          make -C infra smoke
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: |
+          make -C infra logs
+
+      - name: Cleanup
+        if: always()
+        run: |
+          make -C infra down
