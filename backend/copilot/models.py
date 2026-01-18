@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from pgvector.django import VectorField
 
 class Workspace(models.Model):
     name = models.CharField(max_length=255)
@@ -40,6 +41,7 @@ class EmbeddingChunk(models.Model):
     chunk_index = models.IntegerField()
     text = models.TextField()
     meta = models.JSONField(default=dict, blank=True)
+    embedding = VectorField(dimensions=1536, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

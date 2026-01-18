@@ -14,6 +14,9 @@ from copilot.api.serializers import (
 )
 from copilot.tasks import process_document
 from copilot.services.retriever import keyword_retrieve
+from copilot.services.embeddings import embed_texts
+from copilot.services.vector_retriever import vector_retrieve
+from copilot.services.hybrid_retriever import hybrid_retrieve
 from copilot.services.idempotency import normalize_idempotency_key
 
 @api_view(["GET"])
@@ -103,20 +106,23 @@ def get_sources_from_run(run: AgentRun):
 def ask(request):
     ser = AskSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
-    question = ser.validated_data["question"]
-    mode = ser.validated_data["mode"]
 
+    question = ser.validated_data["question"]
+    mode = ser.validated_data.get("mode", "answer")
+    retriever = ser.validated_data.get("retriever", "auto")
     ws = get_or_create_default_workspace()
 
-    raw_key = request.headers.get("Idempotency-Key", "")
-    idem_key = normalize_idempotency_key(raw_key)
+    # Idempotency (optional)
+    idem_key = request.headers.get("Idempotency-Key") or request.META.get("HTTP_IDEMPOTENCY_KEY")
+    if idem_key:
+        idem_key = normalize_idempotency_key(idem_key)
+
     r_hash = request_hash(question, mode)
 
-    # 1) Replay path
+    # 1) Idempotency replay
     if idem_key:
         existing = IdempotencyKey.objects.filter(key=idem_key).first()
         if existing:
-            # protect against accidental reuse with different request
             if existing.request_hash != r_hash:
                 return Response(
                     {
@@ -128,12 +134,22 @@ def ask(request):
             if existing.run_id:
                 run = AgentRun.objects.get(id=existing.run_id)
                 sources = get_sources_from_run(run)
-                return Response({
+
+                # best-effort: retriever_used from latest retrieve_context step
+                step = AgentStep.objects.filter(run=run, name="retrieve_context").order_by("-id").first()
+                retriever_used = None
+                if step and isinstance(step.output_json, dict):
+                    retriever_used = step.output_json.get("retriever_used")
+
+                resp = {
                     "run_id": run.id,
                     "answer": run.final_output or "",
                     "sources": sources,
                     "idempotent_replay": True,
-                })
+                }
+                if retriever_used:
+                    resp["retriever_used"] = retriever_used
+                return Response(resp)
 
     # 2) Create run (new execution)
     run = AgentRun.objects.create(
@@ -144,7 +160,6 @@ def ask(request):
         status="running",
     )
 
-    # store idempotency record mapped to this run
     if idem_key:
         IdempotencyKey.objects.update_or_create(
             key=idem_key,
@@ -156,13 +171,31 @@ def ask(request):
         )
 
     try:
-        retrieved = keyword_retrieve(ws.id, question, top_k=5)
+        retrieved = []
+        retriever_used = "keyword"
+
+        if retriever == "keyword":
+            retrieved = keyword_retrieve(ws.id, question, top_k=5)
+            retriever_used = "keyword"
+
+        elif retriever == "vector":
+            query_vec = embed_texts([question])[0] if (question or "").strip() else []
+            retrieved = vector_retrieve(ws.id, query_vec, top_k=5) if query_vec else []
+            retriever_used = "vector"
+
+        elif retriever == "hybrid":
+            retrieved = hybrid_retrieve(ws.id, question, top_k=5)
+            retriever_used = "hybrid"
+
+        else:  # auto -> hybrid (default)
+            retrieved = hybrid_retrieve(ws.id, question, top_k=5)
+            retriever_used = "hybrid"
 
         AgentStep.objects.create(
             run=run,
             name="retrieve_context",
-            input_json={"question": question, "top_k": 5},
-            output_json={"results": retrieved},
+            input_json={"question": question, "top_k": 5, "retriever": retriever},
+            output_json={"results": retrieved, "retriever_used": retriever_used},
             status="ok",
         )
 
@@ -173,21 +206,17 @@ def ask(request):
                 "Try uploading more docs or rephrasing the query."
             )
             run.save(update_fields=["status", "final_output"])
-            return Response({
-                "run_id": run.id,
-                "answer": run.final_output,
-                "sources": [],
-            })
+            return Response(
+                {"run_id": run.id, "answer": run.final_output, "sources": [], "retriever_used": retriever_used}
+            )
 
         run.status = "success"
         run.final_output = build_answer_from_retrieved(retrieved)
         run.save(update_fields=["status", "final_output"])
 
-        return Response({
-            "run_id": run.id,
-            "answer": run.final_output,
-            "sources": retrieved,
-        })
+        return Response(
+            {"run_id": run.id, "answer": run.final_output, "sources": retrieved, "retriever_used": retriever_used}
+        )
 
     except Exception as e:
         AgentStep.objects.create(

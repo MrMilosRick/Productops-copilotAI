@@ -5,6 +5,7 @@ from django.db import transaction
 
 from copilot.models import Document, EmbeddingChunk
 from copilot.services.chunking import chunk_text
+from copilot.services.embeddings import embed_texts
 
 
 def sha256_text(text: str) -> str:
@@ -17,7 +18,7 @@ def process_document(self, document_id: int) -> dict:
     updated = (
         Document.objects
         .filter(id=document_id)
-        .exclude(status__in=["chunking", "chunked"])
+        .exclude(status__in=["chunking"])
         .update(status="chunking")
     )
     if updated == 0:
@@ -49,7 +50,15 @@ def process_document(self, document_id: int) -> dict:
             if objs:
                 EmbeddingChunk.objects.bulk_create(objs)
 
-            doc.status = "chunked"
+                # Compute + persist embeddings (stub for now)
+                chunks_qs = EmbeddingChunk.objects.filter(document=doc).order_by("chunk_index")
+                texts = [c.text for c in chunks_qs]
+                vectors = embed_texts(texts) if texts else []
+                for c, v in zip(chunks_qs, vectors):
+                    c.embedding = v
+                    c.save(update_fields=["embedding"])
+
+            doc.status = "embedded"
             doc.chunk_count = len(chunks)
             doc.content_hash = sha256_text(doc.content or "")
             doc.save(update_fields=["status", "chunk_count", "content_hash"])

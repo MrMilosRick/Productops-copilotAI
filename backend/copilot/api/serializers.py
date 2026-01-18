@@ -8,6 +8,7 @@ class UploadTextSerializer(serializers.Serializer):
 class AskSerializer(serializers.Serializer):
     question = serializers.CharField(required=True)
     mode = serializers.ChoiceField(choices=["answer", "document", "automation"], default="answer")
+    retriever = serializers.ChoiceField(choices=["auto","vector","keyword","hybrid"], default="auto", required=False)
 
 class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
@@ -55,3 +56,20 @@ class AgentStepSerializer(serializers.ModelSerializer):
             "output_json",
             "created_at",
         ]
+
+
+try:
+    from copilot.models import Run  # type: ignore
+except ImportError:
+    from copilot.models import AgentRun as Run  # type: ignore
+from copilot.models import AgentStep
+
+class RunSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Run
+        fields = "__all__"
+
+class AgentStepSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AgentStep
+        fields = "__all__"

@@ -51,3 +51,15 @@ media/
 
 # local backups
 Makefile.bak.*
+
+# local editor / debug backups
+backend/copilot/api/views.py.bak.*
+backend/copilot/api/views.py.bak_fix_*
+*.pyc
+__pycache__/
+
+# local editor / debug backups
+backend/copilot/api/views.py.bak.*
+backend/copilot/api/views.py.bak_fix_*
+*.pyc
+__pycache__/
