@@ -49,16 +49,13 @@ def main():
 
     keyword = f"RAGTEST_{int(time.time())}"
     title = f"E2E Doc {keyword}"
-    content = f"Alpha beta gamma. This is an E2E document. Keyword: {keyword}."
-
+    content = f"SMOKE_E2E UNIQUE_DOC={title} UNIQUE_KEY={keyword}. Keyword: {keyword}. Keyword: {keyword}. End."
     up = req("POST", "/api/kb/upload_text/", {"title": title, "content": content})
     doc_id = int(up["document_id"])
     print(f"uploaded doc_id={doc_id} keyword={keyword}")
 
     poll_embedded(doc_id)
-
-    q = "What keyword is inside the document? Return the exact keyword."
-
+    q = f"From document titled '{title}' return the exact keyword: {keyword}. Return only the keyword."
     a1 = req("POST", "/api/ask/", {"question": q, "retriever": "hybrid", "top_k": 3})
     run1 = int(a1["run_id"])
     used1 = a1.get("retriever_used")
@@ -66,6 +63,17 @@ def main():
         raise SystemExit(f"expected retriever_used=hybrid, got {used1}")
 
     a2 = req("POST", "/api/ask/", {"question": q, "retriever": "auto", "top_k": 3})
+    # --- assertions: top-1 must contain our unique keyword ---
+    sources = (a2 or {}).get("sources") or []
+    if not sources:
+        raise SystemExit("ask returned empty sources")
+
+    top = sources[0]
+    top_snip = (top.get("snippet") or "")
+    if keyword not in top_snip:
+        raise SystemExit(f"top-1 snippet does not contain our keyword: {keyword} | got: {top_snip!r}")
+    # --- /assertions ---
+
     run2 = int(a2["run_id"])
     used2 = a2.get("retriever_used")
     if used2 != "hybrid":
