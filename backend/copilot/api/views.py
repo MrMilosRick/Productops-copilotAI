@@ -64,8 +64,6 @@ def kb_upload_text(request):
     )
     process_document.delay(doc.id)
 
-
-
     return Response({"document_id": doc.id, "status": "uploaded", "queued": True}, status=status.HTTP_201_CREATED)
 
 @api_view(["GET"])
