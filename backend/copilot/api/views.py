@@ -110,6 +110,10 @@ def ask(request):
     question = ser.validated_data["question"]
     mode = ser.validated_data.get("mode", "answer")
     retriever = ser.validated_data.get("retriever", "auto")
+    top_k = int(ser.validated_data.get("top_k", 5) or 5)
+    document_id = ser.validated_data.get("document_id")
+    if document_id is not None:
+        document_id = int(document_id)
     ws = get_or_create_default_workspace()
 
     # Idempotency (optional)

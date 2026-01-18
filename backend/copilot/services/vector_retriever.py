@@ -4,7 +4,7 @@ from pgvector.django import CosineDistance
 from copilot.models import EmbeddingChunk
 
 
-def vector_retrieve(workspace_id: int, query_vector: List[float], top_k: int = 5) -> List[Dict[str, Any]]:
+def vector_retrieve(workspace_id: int, query_vector: List[float], top_k: int = 5, document_id: int | None = None) -> List[Dict[str, Any]]:
     """
     Vector retrieval using pgvector cosine distance.
     Returns sources in the same shape as keyword_retrieve().
@@ -12,8 +12,7 @@ def vector_retrieve(workspace_id: int, query_vector: List[float], top_k: int = 5
     """
     if not query_vector:
         return []
-
-    qs = (
+    base_qs = (
         EmbeddingChunk.objects
         .select_related("document")
         .filter(document__workspace_id=workspace_id)
@@ -21,6 +20,10 @@ def vector_retrieve(workspace_id: int, query_vector: List[float], top_k: int = 5
         .annotate(distance=CosineDistance("embedding", query_vector))
         .order_by("distance")[: max(1, int(top_k))]
     )
+
+    qs = base_qs
+    if document_id is not None:
+        qs = qs.filter(document_id=int(document_id))
 
     results: List[Dict[str, Any]] = []
     for ch in qs:
