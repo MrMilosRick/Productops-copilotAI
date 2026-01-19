@@ -18,6 +18,8 @@ from copilot.services.embeddings import embed_texts
 from copilot.services.vector_retriever import vector_retrieve
 from copilot.services.hybrid_retriever import hybrid_retrieve
 from copilot.services.idempotency import normalize_idempotency_key
+from copilot.services.llm import rag_answer_langchain
+from copilot.services.answer import deterministic_synthesis, langchain_rag_answer
 
 @api_view(["GET"])
 def health(request):
@@ -90,10 +92,12 @@ def kb_document_detail(request, document_id: int):
 # --------------------
 
 def build_answer_from_retrieved(retrieved):
-    answer_lines = ["Found relevant context in KB:"]
-    for i, r in enumerate(retrieved, start=1):
-        answer_lines.append(f"{i}. [{r['document_title']}] {r['snippet']}")
-    return "\n\n".join(answer_lines)
+    lines = ["Found relevant context in KB:"]
+    for i, r in enumerate(retrieved or [], start=1):
+        title = (r or {}).get("document_title", "")
+        snip = ((r or {}).get("snippet", "") or "").strip()
+        lines.append(f"{i}. [{title}] {snip}")
+    return "\n\n".join(lines)
 
 def get_sources_from_run(run: AgentRun):
     step = run.steps.filter(name="retrieve_context").order_by("-id").first()
@@ -112,6 +116,7 @@ def ask(request):
     retriever = ser.validated_data.get("retriever", "auto")
     top_k = int(ser.validated_data.get("top_k", 5) or 5)
     document_id = ser.validated_data.get("document_id")
+    answer_mode = ser.validated_data.get("answer_mode","sources_only")
     if document_id is not None:
         document_id = int(document_id)
     ws = get_or_create_default_workspace()
@@ -177,6 +182,7 @@ def ask(request):
     try:
         retrieved = []
         retriever_used = "keyword"
+        llm_used = "none"
 
         if retriever == "keyword":
             retrieved = keyword_retrieve(ws.id, question, top_k=top_k)
@@ -204,22 +210,60 @@ def ask(request):
         )
 
         if not retrieved:
+
             run.status = "success"
+
             run.final_output = (
+
                 "I couldn't find relevant knowledge in the KB for this question.\n"
+
                 "Try uploading more docs or rephrasing the query."
-            )
-            run.save(update_fields=["status", "final_output"])
-            return Response(
-                {"run_id": run.id, "answer": run.final_output, "sources": [], "retriever_used": retriever_used}
+
             )
 
+            run.save(update_fields=["status", "final_output"])
+
+            return Response(
+
+                {
+
+                    "run_id": run.id,
+
+
+                    "sources": [],
+
+                    "retriever_used": retriever_used,
+
+                    "llm_used": llm_used,
+
+                    "answer_mode": answer_mode,
+
+                }
+
+            )
+
+
         run.status = "success"
-        run.final_output = build_answer_from_retrieved(retrieved)
+        if answer_mode == "sources_only":
+            llm_used = "none"
+            run.final_output = ""
+        elif answer_mode == "deterministic":
+            llm_used = "none"
+            run.final_output = deterministic_synthesis(question, retrieved)
+        elif answer_mode == "langchain_rag":
+            run.status = "error"
+            run.error = "answer_mode=langchain_rag is not implemented yet"
+            run.save(update_fields=["status","error"])
+            return Response({"run_id": run.id, "error": run.error, "sources": retrieved, "retriever_used": retriever_used, "llm_used": "none", "answer_mode": answer_mode}, status=501)
+        else:
+            run.status = "error"
+            run.error = f"unknown answer_mode: {answer_mode}"
+            run.save(update_fields=["status","error"])
+            return Response({"run_id": run.id, "error": run.error, "sources": retrieved, "retriever_used": retriever_used, "llm_used": "none", "answer_mode": answer_mode}, status=400)
         run.save(update_fields=["status", "final_output"])
 
         return Response(
-            {"run_id": run.id, "answer": run.final_output, "sources": retrieved, "retriever_used": retriever_used}
+            {"run_id": run.id, "answer": run.final_output, "sources": retrieved, "retriever_used": retriever_used, "llm_used": llm_used, "answer_mode": answer_mode}
         )
 
     except Exception as e:
@@ -233,7 +277,7 @@ def ask(request):
         run.status = "error"
         run.error = str(e)
         run.save(update_fields=["status", "error"])
-        return Response({"run_id": run.id, "error": str(e)}, status=500)
+        return Response({"run_id": run.id, "llm_used": llm_used,  "error": str(e)}, status=500)
 
 # --------------------
 # Traces API
