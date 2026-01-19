@@ -19,7 +19,7 @@ def _query_terms(question: str) -> List[str]:
     return [t for t in terms if t not in stop]
 
 
-def hybrid_retrieve(workspace_id: int, question: str, top_k: int = 5) -> List[Dict[str, Any]]:
+def hybrid_retrieve(workspace_id: int, question: str, top_k: int = 5, document_id: int | None = None) -> List[Dict[str, Any]]:
     top_k = max(1, int(top_k))
     expand = max(10, top_k * 5)
 
@@ -27,8 +27,12 @@ def hybrid_retrieve(workspace_id: int, question: str, top_k: int = 5) -> List[Di
     terms_set = set(terms)
 
     query_vec = embed_texts([question])[0] if (question or "").strip() else []
-    v_res = vector_retrieve(workspace_id, query_vec, top_k=expand) if query_vec else []
-    k_res = keyword_retrieve(workspace_id, question, top_k=expand)
+    v_res = vector_retrieve(workspace_id, query_vec, top_k=expand, document_id=document_id) if query_vec else []
+    k_res = []
+    if document_id is None:
+            k_res = []  # HYBRID_DOCID_GUARD
+    if document_id is None:
+        k_res = keyword_retrieve(workspace_id, question, top_k=expand)
 
     merged: Dict[int, Dict[str, Any]] = {}
 
