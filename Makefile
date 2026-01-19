@@ -82,3 +82,7 @@ ci-up:
 	cd infra && docker compose up -d --build
 
 ci: ci-up health demo
+
+SMOKE_URL ?= http://localhost:8000
+smoke2: wait
+	@cd infra && docker compose exec -T web bash -lc 'BASE=$(SMOKE_URL) /app/scripts/smoke_e2e.sh'
