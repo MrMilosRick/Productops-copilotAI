@@ -1,0 +1,173 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta>
+    body { font-family: ui-sans-serif, system-ui, -apple-system; margin: 24px; max-width: 980px; }
+    h1 { margin: 0 0 8px; }
+    .muted { color: #666; margin-bottom: 16px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    textarea, input { width: 100%; padding: 10px; font-size: 14px; }
+    textarea { min-height: 140px; }
+    button { padding: 10px 14px; font-size: 14px; cursor: pointer; }
+    pre { background: #f6f6f6; padding: 12px; overflow: auto; }
+    .card { border: 1px solid #eee; border-radius: 10px; padding: 14px; margin: 14px 0; }
+    .ok { color: #0a7; }
+    .warn { color: #c60; }
+    .err { color: #c00; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { border-bottom: 1px solid #eee; padding: 8px; text-align: left; vertical-align: top; }
+  </style>
+</head>
+<body>
+  <h1>ProductOps Copilot UI</h1>
+  <div class="muted">Thin demo UI over the RAG engine API. No auth, no persistence beyond the backend.</div>
+
+  <div class="card">
+    <h3>1) Upload text document</h3>
+    <div class="row">
+      <div>
+        <label>Title</label>
+        <input id="title" placeholder="Demo doc title" />
+      </div>
+      <div>
+        <label>Top-k</label>
+        <input id="topk" type="number" value="3" min="1" max="20" />
+      </div>
+    </div>
+    <label>Content</label>
+    <textarea id="content" placeholder="Paste text here..."></textarea>
+    <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+      <button id="btnUpload">Upload</button>
+      <span id="uploadStatus" class="muted"></span>
+    </div>
+    <div style="margin-top:10px;">
+      <div><b>document_id:</b> <span id="docId" class="muted">—</span></div>
+      <div><b>status:</b> <span id="docStatus" class="muted">—</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>2) Ask (scoped to document_id)</h3>
+    <label>Question</label>
+    <input id="question" placeholder="Ask something..." />
+    <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+      <buttd="btnAsk">Ask</button>
+      <span id="askStatus" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Answer</h3>
+    <div><b>retriever_used:</b> <span id="retrieverUsed" class="muted">—</span></div>
+    <div><b>run_id:</b> <span id="runId" class="muted">—</span></div>
+    <pre id="answer" style="white-space:pre-wrap;">—</pre>
+
+    <h3>Sources</h3>
+    <table id="sourcesTbl">
+      <thead>
+        <tr>
+          <th>doc</th>
+          <th>chunk</th>
+          <th>score</th>
+          <th>snippet</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+<script>
+const API = "/api";
+
+const el = (id) => document.getElementById(id);
+
+async function apiFetch(path, opts={}) {
+  const res = await fetch(API + path, {
+    headers: { "Content-Type": "application/json", ...(opts.headers||{}) },
+    ...opts,
+  });
+  const txt = await res.text();
+  let data;
+  try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
+  if (!res.ok) throw new Error((data && data.detailON.stringify(data.detail) : txt);
+  return data;
+}
+
+async function pollDoc(docId) {
+  for (let i=0;i<60;i++) {
+    const d = await apiFetch(`/kb/documents/${docId}/`, { method: "GET", headers: {} });
+    el("docStatus").textContent = d.status || "—";
+    if ((d.status || "").toLowerCase() === "embedded") return d;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  throw new Error("timeout waiting for embedded");
+}
+
+function renderSources(sources) {
+  const tbody = el("sourcesTbl").querySelector("tbody");
+  tbody.innerHTML = "";
+  (sources || []).forEach(s => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${s.document_id ?? ""}</td>
+      <td>${s.chunk_index ?? s.chunk_id ?? ""}</td>
+      <td>${(s.score ?? "").toString().slice(0,8)}</td>
+      <td>${(s.snippet ?? "").toString()}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+el("btnUpload").addEventListener("click", async () => {
+  el("uploadStatus").textContent = "uploading...";
+  el("uploadStatus").className = "muted"  try {
+    const title = el("title").value || ("UI Doc " + Date.now());
+    const content = el("content").value || "Hello from UI.";
+    const r = await apiFetch("/kb/upload_text/", {
+      method: "POST",
+      body: JSON.stringify({ title, content }),
+    });
+    const docId = r.document_id;
+    el("docId").textContent = docId;
+    el("docStatus").textContent = r.status || "uploaded";
+    el("uploadStatus").textContent = "queued ✓ (waiting for embedded...)";
+    el("uploadStatus").className = "ok";
+
+    await pollDoc(docId);
+    el("uploadStatus").textContent = "embedded ✓";
+    el("uploadStatus").className = "ok";
+  } catch (e) {
+    el("uploadStatus").textContent = "error: " + e.message;
+    el("uploadStatus").className = "err";
+  }
+});
+
+el("btnAsk").addEventListener("click", async () => {
+  el("askStatus").textContent = "asking...";
+  el("askStatus").className = "muted";
+  try {
+    const docId = parseInt(el("docId").textContent, 10);
+    if (!docId) throw new Error("upload a document first (documid is empty)");
+    const question = el("question").value || "What is this document about?";
+    const top_k = parseInt(el("topk").value || "3", 10);
+    const r = await apiFetch("/ask/", {
+      method: "POST",
+      body: JSON.stringify({ question, retriever: "auto", top_k, document_id: docId }),
+    });
+
+    el("retrieverUsed").textContent = r.retriever_used || "—";
+    el("runId").textContent = r.run_id || "—";
+    el("answer").textContent = r.answer || JSON.stringify(r, null, 2);
+
+    renderSources(r.sources || []);
+    el("askStatus").textContent = "ok ✓";
+    el("askStatus").className = "ok";
+  } catch (e) {
+    el("askStatus").textContent = "error: " + e.message;
+    el("askStatus").className = "err";
+  }
+});
+</script>
+</body>
+</html>
