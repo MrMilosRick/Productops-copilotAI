@@ -70,7 +70,7 @@ fresh: reset up demo
 
 all: fresh
 
-smoke: fresh
+smoke_legacy: fresh
 	@echo "SMOKE: DB counts"
 	@cd infra && docker compose exec -T db sh -lc 'psql -U copilot -d copilot -Atc "select count(*) from copilot_document;"' | grep -qx "1"
 	@cd infra && docker compose exec -T db sh -lc 'psql -U copilot -d copilot -Atc "select count(*) from copilot_embeddingchunk where document_id=1;"' | grep -qx "1"
@@ -89,3 +89,4 @@ smoke2: wait
 
 # Default smoke should be deterministic E2E via API
 smoke: smoke2
+
