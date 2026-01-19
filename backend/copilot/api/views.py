@@ -179,26 +179,26 @@ def ask(request):
         retriever_used = "keyword"
 
         if retriever == "keyword":
-            retrieved = keyword_retrieve(ws.id, question, top_k=5)
+            retrieved = keyword_retrieve(ws.id, question, top_k=top_k)
             retriever_used = "keyword"
 
         elif retriever == "vector":
             query_vec = embed_texts([question])[0] if (question or "").strip() else []
-            retrieved = vector_retrieve(ws.id, query_vec, top_k=5) if query_vec else []
+            retrieved = vector_retrieve(ws.id, query_vec, top_k=top_k, document_id=document_id) if query_vec else []
             retriever_used = "vector"
 
         elif retriever == "hybrid":
-            retrieved = hybrid_retrieve(ws.id, question, top_k=5)
+            retrieved = hybrid_retrieve(ws.id, question, top_k=top_k, document_id=document_id)
             retriever_used = "hybrid"
 
         else:  # auto -> hybrid (default)
-            retrieved = hybrid_retrieve(ws.id, question, top_k=5)
+            retrieved = hybrid_retrieve(ws.id, question, top_k=top_k, document_id=document_id)
             retriever_used = "hybrid"
 
         AgentStep.objects.create(
             run=run,
             name="retrieve_context",
-            input_json={"question": question, "top_k": 5, "retriever": retriever},
+            input_json={"question": question, "top_k": top_k, "retriever": retriever, "document_id": document_id},
             output_json={"results": retrieved, "retriever_used": retriever_used},
             status="ok",
         )

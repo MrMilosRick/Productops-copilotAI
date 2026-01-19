@@ -17,13 +17,16 @@ def vector_retrieve(workspace_id: int, query_vector: List[float], top_k: int = 5
         .select_related("document")
         .filter(document__workspace_id=workspace_id)
         .exclude(embedding__isnull=True)
+    )
+
+    if document_id is not None:
+        base_qs = base_qs.filter(document_id=int(document_id))
+
+    qs = (
+        base_qs
         .annotate(distance=CosineDistance("embedding", query_vector))
         .order_by("distance")[: max(1, int(top_k))]
     )
-
-    qs = base_qs
-    if document_id is not None:
-        qs = qs.filter(document_id=int(document_id))
 
     results: List[Dict[str, Any]] = []
     for ch in qs:
