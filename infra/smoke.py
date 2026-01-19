@@ -56,13 +56,13 @@ def main():
 
     poll_embedded(doc_id)
     q = f"From document titled '{title}' return the exact keyword: {keyword}. Return only the keyword."
-    a1 = req("POST", "/api/ask/", {"question": q, "retriever": "hybrid", "top_k": 3})
+    a1 = req("POST", "/api/ask/", {"question": q, "retriever": "hybrid", "top_k": 3, "document_id": doc_id})
     run1 = int(a1["run_id"])
     used1 = a1.get("retriever_used")
     if used1 != "hybrid":
         raise SystemExit(f"expected retriever_used=hybrid, got {used1}")
 
-    a2 = req("POST", "/api/ask/", {"question": q, "retriever": "auto", "top_k": 3})
+    a2 = req("POST", "/api/ask/", {"question": q, "retriever": "auto", "top_k": 3, "document_id": doc_id})
     # --- assertions: top-1 must contain our unique keyword ---
     sources = (a2 or {}).get("sources") or []
     if not sources:
