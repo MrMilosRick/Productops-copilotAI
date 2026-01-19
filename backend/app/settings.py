@@ -19,8 +19,7 @@ INSTALLED_APPS = [
 
     "rest_framework",
     'copilot.apps.CopilotConfig',
-    "ui",
-]
+    "ui.apps.UiConfig",]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
