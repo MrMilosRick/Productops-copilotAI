@@ -2,7 +2,9 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProductOps Copilot UI</title>
+  <style>
     body { font-family: ui-sans-serif, system-ui, -apple-system; margin: 24px; max-width: 980px; }
     h1 { margin: 0 0 8px; }
     .muted { color: #666; margin-bottom: 16px; }
@@ -10,10 +12,9 @@
     textarea, input { width: 100%; padding: 10px; font-size: 14px; }
     textarea { min-height: 140px; }
     button { padding: 10px 14px; font-size: 14px; cursor: pointer; }
-    pre { background: #f6f6f6; padding: 12px; overflow: auto; }
+    pre { background: #f6f6f6; padding: 12px; overflow: auto; border-radius: 10px; }
     .card { border: 1px solid #eee; border-radius: 10px; padding: 14px; margin: 14px 0; }
     .ok { color: #0a7; }
-    .warn { color: #c60; }
     .err { color: #c00; }
     table { width: 100%; border-collapse: collapse; }
     td, th { border-bottom: 1px solid #eee; padding: 8px; text-align: left; vertical-align: top; }
@@ -21,7 +22,7 @@
 </head>
 <body>
   <h1>ProductOps Copilot UI</h1>
-  <div class="muted">Thin demo UI over the RAG engine API. No auth, no persistence beyond the backend.</div>
+  <div class="muted">Thin demo UI over the RAG engine API: upload → ask → sources → trace.</div>
 
   <div class="card">
     <h3>1) Upload text document</h3>
@@ -45,14 +46,12 @@
       <div><b>document_id:</b> <span id="docId" class="muted">—</span></div>
       <div><b>status:</b> <span id="docStatus" class="muted">—</span></div>
     </div>
-  </div>
-
-  <div class="card">
+  </di class="card">
     <h3>2) Ask (scoped to document_id)</h3>
     <label>Question</label>
     <input id="question" placeholder="Ask something..." />
     <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
-      <buttd="btnAsk">Ask</button>
+      <button id="btnAsk">Ask</button>
       <span id="askStatus" class="muted"></span>
     </div>
   </div>
@@ -77,9 +76,17 @@
     </table>
   </div>
 
+  <div class="card">
+    <h3>Trace</h3>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <button id="btnTrace">Show trace (steps)</button>
+      <span id="tatus" class="muted"></span>
+    </div>
+    <pre id="trace" style="white-space:pre-wrap;">—</pre>
+  </div>
+
 <script>
 const API = "/api";
-
 const el = (id) => document.getElementById(id);
 
 async function apiFetch(path, opts={}) {
@@ -90,13 +97,13 @@ async function apiFetch(path, opts={}) {
   const txt = await res.text();
   let data;
   try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
-  if (!res.ok) throw new Error((data && data.detailON.stringify(data.detail) : txt);
+  if (!res.ok) throw new Error((data && data.detail) ? JSON.stringify(data.detail) : txt);
   return data;
 }
 
 async function pollDoc(docId) {
   for (let i=0;i<60;i++) {
-    const d = await apiFetch(`/kb/documents/${docId}/`, { method: "GET", headers: {} });
+    const d = await apiFetch("/kb/documents/" + docId + "/", { method: "GET", headers: {} });
     el("docStatus").textContent = d.status || "—";
     if ((d.status || "").toLowerCase() === "embedded") return d;
     await new Promise(r => setTimeout(r, 1000));
@@ -105,7 +112,7 @@ async function pollDoc(docId) {
 }
 
 function renderSources(sources) {
-  const tbody = el("sourcesTbl").querySelector("tbody");
+  const tbody = el("sourcesTbquerySelector("tbody");
   tbody.innerHTML = "";
   (sources || []).forEach(s => {
     const tr = document.createElement("tr");
@@ -121,7 +128,8 @@ function renderSources(sources) {
 
 el("btnUpload").addEventListener("click", async () => {
   el("uploadStatus").textContent = "uploading...";
-  el("uploadStatus").className = "muted"  try {
+  el("uploadStatus").className = "muted";
+  try {
     const title = el("title").value || ("UI Doc " + Date.now());
     const content = el("content").value || "Hello from UI.";
     const r = await apiFetch("/kb/upload_text/", {
@@ -132,7 +140,7 @@ el("btnUpload").addEventListener("click", async () => {
     el("docId").textContent = docId;
     el("docStatus").textContent = r.status || "uploaded";
     el("uploadStatus").textContent = "queued ✓ (waiting for embedded...)";
-    el("uploadStatus").className = "ok";
+    el("uploadStatus")lassName = "ok";
 
     await pollDoc(docId);
     el("uploadStatus").textContent = "embedded ✓";
@@ -148,9 +156,10 @@ el("btnAsk").addEventListener("click", async () => {
   el("askStatus").className = "muted";
   try {
     const docId = parseInt(el("docId").textContent, 10);
-    if (!docId) throw new Error("upload a document first (documid is empty)");
+    if (!docId) throw new Error("upload a document first (document_id is empty)");
     const question = el("question").value || "What is this document about?";
     const top_k = parseInt(el("topk").value || "3", 10);
+
     const r = await apiFetch("/ask/", {
       method: "POST",
       body: JSON.stringify({ question, retriever: "auto", top_k, document_id: docId }),
@@ -158,14 +167,33 @@ el("btnAsk").addEventListener("click", async () => {
 
     el("retrieverUsed").textContent = r.retriever_used || "—";
     el("runId").textContent = r.run_id || "—";
-    el("answer").textContent = r.answer || JSON.stringify(r, null, 2);
-
+    el("answer").textContent = r.answer || JSON.stringify(r, nul
     renderSources(r.sources || []);
+
+    el("trace").textContent = "—";
+    el("traceStatus").textContent = "";
+
     el("askStatus").textContent = "ok ✓";
     el("askStatus").className = "ok";
   } catch (e) {
     el("askStatus").textContent = "error: " + e.message;
     el("askStatus").className = "err";
+  }
+});
+
+el("btnTrace").addEventListener("click", async () => {
+  el("traceStatus").textContent = "loading...";
+  el("traceStatus").className = "muted";
+  try {
+    const runId = (el("runId").textContent || "").trim();
+    if (!runId || runId === "—") throw new Error("ask first (run_id is empty)");
+    const steps = await apiFetch("/runs/" + runId + "/steps/", { method: "GET", headers: {} });
+    el("trace").textContent = JSON.stringify(steps, null, 2);
+    el("traceStatus").textContent = "ok ✓";
+    el("traceStatus").className = "ok";
+  } catch (e) {
+    el("traceStatus").textContent = "error: " + e.message;
+    el("traceStatus").className = "err";
   }
 });
 </script>
