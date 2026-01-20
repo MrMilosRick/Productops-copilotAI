@@ -181,9 +181,11 @@ def ask(request):
     if idem_key:
         idem_key = normalize_idempotency_key(idem_key)
 
-    actor_id = (request.user.id if getattr(request.user, "is_authenticated", False) else None)
+    actor_id = (int(request.user.id) if getattr(request.user, "is_authenticated", False) else None)
 
-    r_hash = request_hash({"workspace_id": getattr(ws, "id", None), "actor_id": actor_id, "mode": mode, "question": question, "retriever": retriever, "top_k": top_k, "document_id": document_id, "answer_mode": answer_mode})
+    payload_for_idem = {"workspace_id": getattr(ws, "id", None), "actor_id": actor_id, "mode": mode, "question": question, "retriever": retriever, "top_k": top_k, "document_id": document_id, "answer_mode": answer_mode}
+
+    r_hash = request_hash(payload_for_idem)
 
     # 1) Idempotency replay
     if idem_key:
