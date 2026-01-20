@@ -13,3 +13,4 @@ gunicorn==23.0.0
 # (later) LangChain/LangGraph will be added
 # langchain
 # langgraph
+openai>=1.0.0
