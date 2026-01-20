@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProductOps Copilot — Thin UI</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; max-width: 980px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    textarea, input, select, button { width: 100%; padding: 10px; font-size: 14px; box-sizing: border-box; }
+    textarea { min-height: 120px; }
+    pre { background: #f6f8fa; padding: 12px; overflow: auto; border-radius: 8px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; }
+    .muted { color: #6b7280; font-size: 13px; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #eef2ff; font-size: 12px; }
+    .err { color: #b91c1c; white-space: pre-wrap; }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>ProductOps Copilot <span class="pill">Thin UI</span></h1>
+  <p class="muted">Тонкий клиент к API: upload → processing → ask → answer + sources + run/trace. Без auth, без chat.</p>
+
+  <div class="row">
+    <div class="card">
+      <h2>1) Upload (text)</h2>
+
+      <label class="muted">Workspace (опционально)</label>
+      <input id="workspace" placeholder="default" value="default" />
+
+      <label class="muted" style="margin-top:10px;">Document title</label>
+      <input id="title" placeholder="Demo doc" value="Demo doc" />
+
+      <label class="muted" style="margin-top:10px;">Content</label>
+      <textarea id="content" placeholder="Вставь текст документа сюда..."></textarea>
+
+      <button id="btnUpload" style="margin-top:10px;">Upload</button>
+
+      <p class="muted">Upload result:</p>
+      <pre id="uploadOut">{}</pre>
+
+      <p class="muted">Document status:</p>
+      <pre id="docOut">null</pre>
+    </div>
+
+    <div class="card">
+      <h2>2) Ask</h2>
+
+      <label class="muted">Question</label>
+      <textarea id="question" placeholder="Задай вопрос по загруженному документу..."></textarea>
+
+      <div class="row" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
+        <div>
+          <label class="muted">Answer mode</label>
+          <select id="answerMode">
+            <option value="sources_only">sources_only</option>
+            <option value="answer" selected>answer</option>
+          </select>
+        </div>
+        <div>
+          <label class="muted">Document id</label>
+          <input id="documentId" placeholder="auto" value="auto" />
+        </div>
+      </div>
+
+      <div class="row" style="grid-template-columns: 1fr 1fr; margin-top:10px;">
+        <div>
+          <label class="muted">Retriever</label>
+          <select id="retriever">
+            <option value="auto" selected>auto</option>
+            <option value="vector">vector</option>
+            <option value="keyword">keyword</option>
+            <option value="hybrid">hybrid</option>
+          </select>
+        </div>
+        <div>
+          <label class="muted">Top K</label>
+          <input id="topk" type="number" value="5" min="1" max="20" />
+        </div>
+      </div>
+
+      <button id="btnAsk" style="margin-top:10px;">Ask</button>
+
+      <p class="muted">Answer:</p>
+      <pre id="answerOut">{}</pre>
+
+      <p class="muted">Sources:</p>
+      <pre id="sourcesOut">[]</pre>
+
+      <p class="muted">Run / trace:</p>
+      <pre id="runOut">null</pre>
+
+      <div class="muted" style="display:flex; gap:12px; align-items:center;">
+        <span>Links:</span>
+        <a id="runLink" href="#" target="_blank" rel="noopener">run</a>
+        <a id="stepsLink" href="#" target="_blank" rel="noopener">steps</a>
+      </div>
+
+      <button id="btnSteps" style="margin-top:10px;">Load run steps</button>
+      <p class="muted">Steps URL:</p>
+      <pre id="stepsUrl">null</pre>
+      <p class="muted">Steps:</p>
+      <pre id="stepsOut">[]</pre>
+
+      <p class="muted">Debug:</p>
+      <pre id="debugOut">null</pre>
+
+      <p id="err" class="err"></p>
+    </div>
+  </div>
+
+<script>
+  const API_BASE = "";
+  const el = (id) => document.getElementById(id);
+  const out = (id, v) => el(id).textContent = JSON.stringify(v, null, 2);
+
+  function newIdempotencyKey(prefix="k") {
+    const r = Math.floor(Math.random() * 1e9);
+    return `${prefix}-${Date.now()}-${r}`;
+  }
+
+  async function jsonFetch(url, opts = {}) {
+    const res = await fetch(url, {
+      headers: { "Accept": "application/json", ...(opts.headers || {}) },
+      ...opts
+    });
+    const txt = await res.text();
+    let data;
+    try { data = txt ? JSON.parse(txt) : null; } catch { data = { raw: txt }; }
+    if (!res.ok) throw Object.assign(new Error("HTTP " + res.status), { status: res.status, data });
+    return data;
+  }
+
+  function setRunLinks(rid) {
+    const id = rid ? String(rid).match(/(\d+)/)?.[1] : "";
+    if (!id) return;
+    const runUrl = `${API_BASE}/api/runs/${id}/`;
+    const stepsUrl = `${API_BASE}/api/runs/${id}/steps/`;
+    el("runLink").href = runUrl;
+    el("stepsLink").href = stepsUrl;
+    el("stepsUrl").textContent = stepsUrl;
+  }
+
+  let lastDocumentId = null;
+  let lastRunId = null;
+
+  el("btnUpload").onclick = async () => {
+    el("err").textContent = "";
+    try {
+      const payload = {
+        workspace: el("workspace").value || "default",
+        title: el("title").value || "Demo doc",
+        content: el("content").value || ""
+      };
+
+      out("debugOut", { click: "upload", url: `${API_BASE}/api/kb/upload_text/`, payload });
+
+      const data = await jsonFetch(`${API_BASE}/api/kb/upload_text/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey("upload")
+        },
+        body: JSON.stringify(payload)
+      });
+
+      out("uploadOut", data);
+      lastDocumentId = data.document_id ?? null;
+
+      if (lastDocumentId) {
+        const doc = await jsonFetch(`${API_BASE}/api/kb/documents/${lastDocumentId}/`, { method: "GET" });
+        out("docOut", doc);
+        el("documentId").value = String(lastDocumentId);
+      }
+    } catch (e) {
+      out("debugOut", { ok: false, status: e.status, data: e.data, msg: e.message });
+      el("err").textContent = "Upload error: " + (e.data ? JSON.stringify(e.data) : e.message);
+    }
+  };
+
+  el("btnAsk").onclick = async () => {
+    el("err").textContent = "";
+    try {
+      const q = (el("question").value || "").trim();
+      if (!q) { el("err").textContent = "Question is required."; return; }
+
+      const docRaw = (el("documentId").value || "").trim();
+      const docId = (docRaw && docRaw !== "auto") ? Number(docRaw) : lastDocumentId;
+
+      const payload = {
+        workspace: el("workspace").value || "default",
+        question: q,
+        retriever: el("retriever").value || "auto",
+        top_k: Number(el("topk").value || 5),
+        document_id: docId,
+        answer_mode: el("answerMode").value || "sources_only"
+      };
+
+      out("debugOut", { click: "ask", url: `${API_BASE}/api/ask/`, payload });
+
+      const data = await jsonFetch(`${API_BASE}/api/ask/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": newIdempotencyKey("ask")
+        },
+        body: JSON.stringify(payload)
+      });
+
+      out("answerOut", { answer: data.answer, retriever_used: data.retriever_used, answer_mode: data.answer_mode });
+      out("sourcesOut", data.sources || []);
+
+      lastRunId = data.run_id ?? null;
+      out("runOut", lastRunId);
+      setRunLinks(lastRunId);
+    } catch (e) {
+      out("debugOut", { ok: false, status: e.status, data: e.data, msg: e.message });
+      el("err").textContent = "Ask error: " + (e.data ? JSON.stringify(e.data) : e.message);
+    }
+  };
+
+  el("btnSteps").onclick = async () => {
+    el("err").textContent = "";
+    try {
+      const rid = lastRunId;
+      if (!rid) { el("err").textContent = "No run_id yet. Click Ask first."; return; }
+
+      const url = `${API_BASE}/api/runs/${rid}/steps/`;
+      out("debugOut", { click: "steps", url });
+
+      const data = await jsonFetch(url, { method: "GET" });
+      out("stepsOut", data);
+      el("stepsUrl").textContent = url;
+    } catch (e) {
+      out("debugOut", { ok: false, status: e.status, data: e.data, msg: e.message });
+      el("err").textContent = "Steps error: " + (e.data ? JSON.stringify(e.data) : e.message);
+    }
+  };
+</script>
+</body>
+</html>

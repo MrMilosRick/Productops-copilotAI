@@ -166,6 +166,24 @@ def main() -> None:
     ok(f"Uploaded doc_id={doc_id}")
     wait_document_ready(doc_id)
 
+    # --- regression: sources constrained to document_id ---
+    token1 = f"TOK1_{int(time.time())}"
+    token2 = f"TOK2_{int(time.time())}"
+
+    d1, _ = try_upload_text()
+    wait_document_ready(d1)
+    d2, _ = try_upload_text()
+    wait_document_ready(d2)
+
+    # overwrite docs content via new uploads is OK for smoke; we just need two ids
+    # ask constrained to d1 must not return sources from d2
+    code_c, data_c, raw_c = ask("What is the unicorn id?", d1, answer_mode="langchain_rag", top_k=5)
+    if code_c != 200 or not isinstance(data_c, dict):
+        die(f"Constraint ask failed: {code_c} {raw_c[:400]}")
+    bad = [s for s in (data_c.get("sources") or []) if isinstance(s, dict) and s.get("document_id") != d1]
+    if bad:
+        die(f"Sources not constrained to document_id={d1}: bad={bad}")
+
     q = "What is the unicorn id?"
     code, data, raw = ask(q, doc_id, answer_mode="langchain_rag")
     if code != 200 or not isinstance(data, dict):

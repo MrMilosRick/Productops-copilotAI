@@ -172,6 +172,15 @@ def ask(request):
         or ser.validated_data.get("answer_mode")
         or "sources_only"
     )
+    # accept UI-friendly alias
+    # answer_mode="answer" -> use real implementation branch
+    if answer_mode == "answer":
+        answer_mode = "langchain_rag"
+
+    # keep run.mode aligned with effective behavior
+    if mode == "answer":
+        mode = answer_mode
+
     if document_id is not None:
         document_id = int(document_id)
     ws = get_or_create_default_workspace()

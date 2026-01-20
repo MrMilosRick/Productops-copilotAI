@@ -20,7 +20,7 @@ def tokenize(query: str) -> List[str]:
             out.append(w)
     return out
 
-def keyword_retrieve(workspace_id: int, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+def keyword_retrieve(workspace_id: int, query: str, top_k: int = 5, document_id: int | None = None) -> List[Dict[str, Any]]:
     """
     MVP keyword retrieval:
     - split query into terms
@@ -46,8 +46,12 @@ def keyword_retrieve(workspace_id: int, query: str, top_k: int = 5) -> List[Dict
         .select_related("document")
         .filter(document__workspace_id=workspace_id)
         .filter(q_obj)
-        .order_by("-id")[:50]
     )
+
+    if document_id is not None:
+        candidates = candidates.filter(document_id=int(document_id))
+
+    candidates = candidates.order_by("-id")[:50]
 
     results: List[Dict[str, Any]] = []
     for ch in candidates:

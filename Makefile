@@ -1,4 +1,5 @@
-.PHONY: up down logs health smoke ci-smoke
+.PHONY: up down logs health smoke ci-smoke lint
+
 
 COMPOSE = docker compose -f infra/docker-compose.yml
 BASE_URL ?= http://localhost:8001
@@ -36,3 +37,10 @@ ci-smoke:
 	$(COMPOSE) up -d --build; \
 	$(MAKE) health; \
 	$(MAKE) smoke
+
+lint:
+	@python3 -m py_compile backend/app/urls.py
+	@python3 -m py_compile backend/copilot/api/views.py
+	@python3 -m py_compile backend/copilot/services/retriever.py backend/copilot/services/hybrid_retriever.py backend/copilot/services/vector_retriever.py
+	@python3 -m py_compile tests/smoke_test.py
+	@echo "OK: lint"
