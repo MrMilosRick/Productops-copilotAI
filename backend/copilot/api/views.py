@@ -19,7 +19,6 @@ from copilot.services.vector_retriever import vector_retrieve
 from copilot.services.hybrid_retriever import hybrid_retrieve
 from copilot.services.idempotency import normalize_idempotency_key
 from copilot.services.llm import rag_answer_openai
-from copilot.services.answer import deterministic_synthesis, langchain_rag_answer
 
 @api_view(["GET"])
 def health(request):
@@ -27,6 +26,27 @@ def health(request):
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+def deterministic_synthesis(question: str, retrieved: list[dict]) -> str:
+    """Deterministic fallback: stitch top snippets and add source refs [i]."""
+    if not retrieved:
+        return "No sources found."
+
+    # Keep a few top sources; prefer already-sorted by final_score
+    top = retrieved[:5]
+
+    parts = []
+    for i, r in enumerate(top, start=1):
+        snippet = (r.get("snippet") or "").strip()
+        if snippet:
+            parts.append(f"{snippet} [{i}]")
+
+    if not parts:
+        return "No useful snippets found in sources."
+
+    # Simple answer: return stitched evidence.
+    # (Keeps behavior deterministic + debuggable)
+    return " ".join(parts)
 
 def request_hash(question: str, mode: str) -> str:
     payload = f"{mode}|{question}".encode("utf-8")
@@ -137,7 +157,11 @@ def ask(request):
     retriever = ser.validated_data.get("retriever", "auto")
     top_k = int(ser.validated_data.get("top_k", 5) or 5)
     document_id = ser.validated_data.get("document_id")
-    answer_mode = ser.validated_data.get("answer_mode","sources_only")
+    answer_mode = (
+        (request.data.get("answer_mode") if isinstance(request.data, dict) else None)
+        or ser.validated_data.get("answer_mode")
+        or "sources_only"
+    )
     if document_id is not None:
         document_id = int(document_id)
     ws = get_or_create_default_workspace()
