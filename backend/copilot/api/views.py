@@ -48,9 +48,19 @@ def deterministic_synthesis(question: str, retrieved: list[dict]) -> str:
     # (Keeps behavior deterministic + debuggable)
     return " ".join(parts)
 
-def request_hash(question: str, mode: str) -> str:
-    payload = f"{mode}|{question}".encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
+def request_hash(payload: dict) -> str:
+    """Hash request payload for idempotency safety (must include all behavior-changing fields)."""
+    import json
+    stable = {
+        "mode": payload.get("mode"),
+        "question": payload.get("question"),
+        "retriever": payload.get("retriever"),
+        "top_k": payload.get("top_k"),
+        "document_id": payload.get("document_id"),
+        "answer_mode": payload.get("answer_mode"),
+    }
+    blob = json.dumps(stable, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
 
 def get_or_create_default_workspace() -> Workspace:
     ws, _ = Workspace.objects.get_or_create(name="default")
@@ -171,7 +181,7 @@ def ask(request):
     if idem_key:
         idem_key = normalize_idempotency_key(idem_key)
 
-    r_hash = request_hash(question, mode)
+    r_hash = request_hash({"mode": mode, "question": question, "retriever": retriever, "top_k": top_k, "document_id": document_id, "answer_mode": answer_mode})
 
     # 1) Idempotency replay
     if idem_key:
