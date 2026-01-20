@@ -67,9 +67,9 @@ def try_upload_text() -> Tuple[int, Dict[str, Any]]:
     candidates = [
         "/api/kb/upload_text/",
         "/api/kb/upload_text",
-        "/api/documents/upload_text/",
-        "/api/documents/upload_text",
-        "/api/documents/",
+        " /api/kb/upload_text/",
+        " /api/kb/upload_text/",
+        "/api/kb/documents/",
         "/api/kb/documents/",
     ]
     payload = {"title": f"Smoke Doc {UNICORN}", "content": DOC_TEXT}
@@ -99,8 +99,8 @@ def try_upload_text() -> Tuple[int, Dict[str, Any]]:
 
 def try_get_document(doc_id: int) -> Dict[str, Any]:
     candidates = [
-        f"/api/documents/{doc_id}/",
-        f"/api/documents/{doc_id}",
+        f" /api/kb/documents/{doc_id}/",
+        f" /api/kb/documents/{doc_id}",
         f"/api/kb/documents/{doc_id}/",
         f"/api/kb/documents/{doc_id}",
     ]
