@@ -18,7 +18,7 @@ from copilot.services.embeddings import embed_texts
 from copilot.services.vector_retriever import vector_retrieve
 from copilot.services.hybrid_retriever import hybrid_retrieve
 from copilot.services.idempotency import normalize_idempotency_key
-from copilot.services.llm import rag_answer_langchain
+from copilot.services.llm import rag_answer_openai
 from copilot.services.answer import deterministic_synthesis, langchain_rag_answer
 
 @api_view(["GET"])
@@ -106,6 +106,27 @@ def get_sources_from_run(run: AgentRun):
     out = step.output_json or {}
     return out.get("results", []) or []
 
+def normalize_source(r: dict) -> dict:
+    # normalize payload so sources in replay == sources in normal response
+    if not isinstance(r, dict):
+        return {}
+    return {
+        "document_id": r.get("document_id"),
+        "document_title": r.get("document_title"),
+        "chunk_id": r.get("chunk_id"),
+        "chunk_index": r.get("chunk_index"),
+        "matched_terms": r.get("matched_terms", []),
+        "distance": r.get("distance"),
+        "score": r.get("score"),
+        "snippet": r.get("snippet"),
+        "retriever_hint": r.get("retriever_hint"),
+        "vector_score": r.get("vector_score"),
+        "keyword_bonus": r.get("keyword_bonus"),
+        "keyword_score": r.get("keyword_score"),
+        "keyword_norm": r.get("keyword_norm"),
+        "final_score": r.get("final_score"),
+    }
+
 @api_view(["POST"])
 def ask(request):
     ser = AskSerializer(data=request.data)
@@ -146,21 +167,29 @@ def ask(request):
 
                 # best-effort: retriever_used from latest retrieve_context step
                 step = AgentStep.objects.filter(run=run, name="retrieve_context").order_by("-id").first()
-                retriever_used = None
+                retriever_used = ""
                 if step and isinstance(step.output_json, dict):
-                    retriever_used = step.output_json.get("retriever_used")
+                    retriever_used = step.output_json.get("retriever_used") or ""
+
+                # best-effort: llm_used / answer_mode from generate_answer step
+                gen = AgentStep.objects.filter(run=run, name="generate_answer").order_by("-id").first()
+                llm_used_prev = getattr(run, "llm_used", None)
+                answer_mode_prev = ""
+                if gen and isinstance(getattr(gen, "output_json", None), dict):
+                    llm_used_prev = (gen.output_json or {}).get("llm_used") or llm_used_prev
+                    answer_mode_prev = (gen.output_json or {}).get("answer_mode") or answer_mode_prev
 
                 resp = {
                     "run_id": run.id,
                     "answer": run.final_output or "",
                     "sources": sources,
+                    "retriever_used": retriever_used,
+                    "llm_used": llm_used_prev or "none",
+                    "answer_mode": answer_mode_prev or "",
                     "idempotent_replay": True,
                 }
-                if retriever_used:
-                    resp["retriever_used"] = retriever_used
                 return Response(resp)
-
-    # 2) Create run (new execution)
+# 2) Create run (new execution)
     run = AgentRun.objects.create(
         workspace=ws,
         user=None,
@@ -251,16 +280,40 @@ def ask(request):
             llm_used = "none"
             run.final_output = deterministic_synthesis(question, retrieved)
         elif answer_mode == "langchain_rag":
-            run.status = "error"
-            run.error = "answer_mode=langchain_rag is not implemented yet"
-            run.save(update_fields=["status","error"])
-            return Response({"run_id": run.id, "error": run.error, "sources": retrieved, "retriever_used": retriever_used, "llm_used": "none", "answer_mode": answer_mode}, status=501)
+            out = rag_answer_openai(question, retrieved)
+            llm_used = out.get("llm_used", "openai")
+            run.final_output = out.get("answer", "")
         else:
             run.status = "error"
             run.error = f"unknown answer_mode: {answer_mode}"
             run.save(update_fields=["status","error"])
             return Response({"run_id": run.id, "error": run.error, "sources": retrieved, "retriever_used": retriever_used, "llm_used": "none", "answer_mode": answer_mode}, status=400)
         run.save(update_fields=["status", "final_output"])
+
+
+        # persist generate_answer step for idempotent replay consistency
+        try:
+            # store llm_used on run if model has such field
+            if hasattr(run, "llm_used"):
+                run.llm_used = llm_used
+                run.save(update_fields=["llm_used"])
+        except Exception:
+            pass
+
+        try:
+            AgentStep.objects.create(
+                run=run,
+                name="generate_answer",
+                input_json={"question": question, "answer_mode": answer_mode},
+                output_json={
+                    "llm_used": llm_used,
+                    "answer_mode": answer_mode,
+                    "answer_preview": (run.final_output or "")[:500],
+                },
+                status="success",
+            )
+        except Exception:
+            pass
 
         return Response(
             {"run_id": run.id, "answer": run.final_output, "sources": retrieved, "retriever_used": retriever_used, "llm_used": llm_used, "answer_mode": answer_mode}
