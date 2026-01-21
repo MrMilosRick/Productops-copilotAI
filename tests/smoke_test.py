@@ -166,14 +166,15 @@ def ask(question: str, doc_id: int, *, answer_mode: str, idem_key: Optional[str]
 def main() -> None:
     print(f"BASE_URL={BASE_URL}")
     wait_health()
+    # If SMOKE_LLM=1, we force LLM branch. OPENAI_API_KEY may live server-side (containers), so do not require it locally.
+    if SMOKE_LLM and not HAS_OPENAI_KEY:
+        print("WARN: SMOKE_LLM=1 but OPENAI_API_KEY is missing locally; assuming server has it")
 
     doc_id, _ = try_upload_text()
     ok(f"Uploaded doc_id={doc_id}")
     wait_document_ready(doc_id)
 
-    answer_mode = "deterministic"
-    if SMOKE_LLM or HAS_OPENAI_KEY:
-        answer_mode = "langchain_rag"
+    answer_mode = "langchain_rag" if (HAS_OPENAI_KEY or SMOKE_LLM) else "deterministic"
 
     # --- regression: sources constrained to document_id ---
     token1 = f"TOK1_{int(time.time())}"
