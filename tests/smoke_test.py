@@ -12,6 +12,11 @@ from typing import Any, Dict, Optional, Tuple
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8001").rstrip("/")
 TIMEOUT_S = int(os.environ.get("SMOKE_TIMEOUT", "90"))
 
+REQ_TIMEOUT_DEFAULT = int(os.environ.get("SMOKE_REQ_TIMEOUT", "15"))
+REQ_TIMEOUT_ASK = int(os.environ.get("SMOKE_ASK_TIMEOUT", "60"))
+SMOKE_LLM = os.environ.get("SMOKE_LLM", "").strip() == "1"
+HAS_OPENAI_KEY = bool(os.environ.get("OPENAI_API_KEY"))
+
 UNICORN = f"UNICORN_SMOKE_{int(time.time())}"
 DOC_TEXT = f"alpha alpha. {UNICORN}. omega omega."
 
@@ -22,7 +27,7 @@ def die(msg: str) -> None:
 def ok(msg: str) -> None:
     print(f"OK: {msg}")
 
-def http(method: str, path: str, *, json_body: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None) -> Tuple[int, str]:
+def http(method: str, path: str, *, json_body: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None, timeout_s: int = REQ_TIMEOUT_DEFAULT) -> Tuple[int, str]:
     url = f"{BASE_URL}{path}"
     data = None
     req_headers = {"Accept": "application/json"}
@@ -35,7 +40,7 @@ def http(method: str, path: str, *, json_body: Optional[Dict[str, Any]] = None, 
 
     req = urllib.request.Request(url, data=data, headers=req_headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             body = resp.read().decode("utf-8", errors="replace")
             return resp.getcode(), body
     except urllib.error.HTTPError as e:
@@ -44,8 +49,8 @@ def http(method: str, path: str, *, json_body: Optional[Dict[str, Any]] = None, 
     except Exception as e:
         return 0, str(e)
 
-def get_json(method: str, path: str, **kwargs) -> Tuple[int, Any, str]:
-    code, text = http(method, path, **kwargs)
+def get_json(method: str, path: str, timeout_s: int = REQ_TIMEOUT_DEFAULT, **kwargs) -> Tuple[int, Any, str]:
+    code, text = http(method, path, timeout_s=timeout_s, **kwargs)
     if not text:
         return code, None, text
     try:
@@ -67,8 +72,8 @@ def try_upload_text() -> Tuple[int, Dict[str, Any]]:
     candidates = [
         "/api/kb/upload_text/",
         "/api/kb/upload_text",
-        " /api/kb/upload_text/",
-        " /api/kb/upload_text/",
+"/api/kb/upload_text/",
+"/api/kb/upload_text/",
         "/api/kb/documents/",
         "/api/kb/documents/",
     ]
@@ -99,8 +104,8 @@ def try_upload_text() -> Tuple[int, Dict[str, Any]]:
 
 def try_get_document(doc_id: int) -> Dict[str, Any]:
     candidates = [
-        f" /api/kb/documents/{doc_id}/",
-        f" /api/kb/documents/{doc_id}",
+        f"/api/kb/documents/{doc_id}/",
+        f"/api/kb/documents/{doc_id}",
         f"/api/kb/documents/{doc_id}/",
         f"/api/kb/documents/{doc_id}",
     ]
@@ -156,7 +161,7 @@ def ask(question: str, doc_id: int, *, answer_mode: str, idem_key: Optional[str]
     headers = {}
     if idem_key:
         headers["Idempotency-Key"] = idem_key
-    return get_json("POST", "/api/ask/", json_body=payload, headers=headers)
+    return get_json("POST", "/api/ask/", json_body=payload, headers=headers, timeout_s=REQ_TIMEOUT_ASK)
 
 def main() -> None:
     print(f"BASE_URL={BASE_URL}")
@@ -165,6 +170,10 @@ def main() -> None:
     doc_id, _ = try_upload_text()
     ok(f"Uploaded doc_id={doc_id}")
     wait_document_ready(doc_id)
+
+    answer_mode = "deterministic"
+    if SMOKE_LLM or HAS_OPENAI_KEY:
+        answer_mode = "langchain_rag"
 
     # --- regression: sources constrained to document_id ---
     token1 = f"TOK1_{int(time.time())}"
@@ -177,7 +186,7 @@ def main() -> None:
 
     # overwrite docs content via new uploads is OK for smoke; we just need two ids
     # ask constrained to d1 must not return sources from d2
-    code_c, data_c, raw_c = ask("What is the unicorn id?", d1, answer_mode="langchain_rag", top_k=5)
+    code_c, data_c, raw_c = ask("What is the unicorn id?", d1, answer_mode=answer_mode, top_k=5)
     if code_c != 200 or not isinstance(data_c, dict):
         die(f"Constraint ask failed: {code_c} {raw_c[:400]}")
     bad = [s for s in (data_c.get("sources") or []) if isinstance(s, dict) and s.get("document_id") != d1]
@@ -185,7 +194,7 @@ def main() -> None:
         die(f"Sources not constrained to document_id={d1}: bad={bad}")
 
     q = "What is the unicorn id?"
-    code, data, raw = ask(q, doc_id, answer_mode="langchain_rag")
+    code, data, raw = ask(q, doc_id, answer_mode=answer_mode)
     if code != 200 or not isinstance(data, dict):
         die(f"/api/ask failed: {code} {raw[:400]}")
 
@@ -202,11 +211,11 @@ def main() -> None:
     ok(f"Ask OK: run_id={data.get('run_id')} llm_used={data.get('llm_used')} answer_mode={data.get('answer_mode')}")
 
     idem = f"smoke-idem-{int(time.time())}"
-    c1, d1, r1 = ask(q, doc_id, answer_mode="langchain_rag", idem_key=idem, top_k=1)
+    c1, d1, r1 = ask(q, doc_id, answer_mode=answer_mode, idem_key=idem, top_k=1)
     if c1 != 200 or not isinstance(d1, dict):
         die(f"Idem first call failed: {c1} {r1[:300]}")
 
-    c2, d2, r2 = ask(q, doc_id, answer_mode="langchain_rag", idem_key=idem, top_k=1)
+    c2, d2, r2 = ask(q, doc_id, answer_mode=answer_mode, idem_key=idem, top_k=1)
     if c2 != 200 or not isinstance(d2, dict):
         die(f"Idem replay call failed: {c2} {r2[:300]}")
 
@@ -216,7 +225,7 @@ def main() -> None:
         die(f"Replay should set idempotent_replay=true. got: {d2}")
     ok(f"Idempotent replay OK: run_id={d2.get('run_id')}")
 
-    c3, d3, r3 = ask(q, doc_id, answer_mode="langchain_rag", idem_key=idem, top_k=2)
+    c3, d3, r3 = ask(q, doc_id, answer_mode=answer_mode, idem_key=idem, top_k=2)
     if c3 != 409:
         die(f"Expected 409 on idem conflict, got {c3}: {r3[:300]}")
     ok("Idempotency conflict (409) OK")
