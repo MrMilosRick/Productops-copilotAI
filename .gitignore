@@ -63,3 +63,6 @@ backend/copilot/api/views.py.bak.*
 backend/copilot/api/views.py.bak_fix_*
 *.pyc
 __pycache__/
+
+# built ui index
+backend/ui/static/ui/index.html
