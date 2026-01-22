@@ -1,4 +1,4 @@
-.PHONY: up down logs health smoke lint ci-smoke dev-smoke
+.PHONY: up down logs health smoke lint ci-smoke dev-smoke ui-dev ui-build ui-sync
 
 COMPOSE = docker compose -f infra/docker-compose.yml
 BASE_URL ?= http://localhost:8001
@@ -49,3 +49,14 @@ dev-smoke:
 	$(MAKE) health; \
 	$(MAKE) smoke; \
 	echo "OK: dev-smoke (containers left running)"
+
+# --- UI (React) ---
+
+ui-dev:
+	@cd frontend && npm run dev
+
+ui-build:
+	@cd frontend && npm run build
+
+ui-sync:
+	@./scripts/ui_sync.sh

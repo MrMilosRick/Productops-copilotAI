@@ -15,6 +15,7 @@ COPY requirements/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY . /app
+RUN mkdir -p /app/staticfiles && chown -R app:app /app/staticfiles
 
 USER app
 CMD ["gunicorn", "app.wsgi:application", "--bind", "0.0.0.0:8000"]
