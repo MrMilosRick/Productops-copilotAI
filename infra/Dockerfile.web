@@ -1,0 +1,29 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl \
+  && rm -rf /var/lib/apt/lists/*
+
+# user
+RUN addgroup --system app && adduser --system --ingroup app app
+
+# python deps
+COPY backend/requirements/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# copy ONLY backend code
+COPY backend /app/backend
+
+# runtime env
+ENV PYTHONPATH=/app/backend
+ENV DJANGO_SETTINGS_MODULE=app.settings
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# perms
+RUN mkdir -p /app/staticfiles && chown -R app:app /app
+USER app
+
+EXPOSE 8000

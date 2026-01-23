@@ -148,6 +148,7 @@ export default function ProductOpsStudio() {
   const [healthOk, setHealthOk] = useState(null);
 
   const [docText, setDocText] = useState("");
+  const [pickedFile, setPickedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [docId, setDocId] = useState(null);
   const [docStatus, setDocStatus] = useState(null);
@@ -231,64 +232,96 @@ export default function ProductOpsStudio() {
   }
 
   async function onPickFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+      const file = e.target.files?.[0];
+      if (!file) return;
 
-    const ok = /\.(txt|md|csv|json)$/i.test(file.name);
-    if (!ok) {
-      setMessages((p) => [...p, { type: "system", content: t("unsupported_file") }]);
+      const ok = /\.(txt|md|csv|json)$/i.test(file.name);
+      if (!ok) {
+        setMessages((p) => [...p, { type: "system", content: t("unsupported_file") }]);
+        e.target.value = "";
+        return;
+      }
+
+      setPickedFile(file);
+
+      // Preview text in textarea (nice UX); backend still receives the original file.
+      try {
+        const text = await file.text();
+        setDocText(text);
+        setMessages((p) => [
+          ...p,
+          { type: "system", content: `${t("file_loaded")}: ${file.name} (${Math.round(text.length / 1000)}k chars)` },
+        ]);
+      } catch {
+        setDocText("");
+        setMessages((p) => [
+          ...p,
+          { type: "system", content: `${t("file_loaded")}: ${file.name}` },
+        ]);
+      }
+
       e.target.value = "";
-      return;
     }
 
-    const text = await file.text();
-    setDocText(text);
-    setMessages((p) => [
-      ...p,
-      { type: "system", content: `${t("file_loaded")}: ${file.name} (${Math.round(text.length / 1000)}k chars)` },
-    ]);
-    e.target.value = "";
-  }
 
   async function handleUpload() {
-    if (!docText.trim()) return;
+      // Allow: either pasted text OR picked file
+      if (!pickedFile && !docText.trim()) return;
 
-    setUploading(true);
-    setAnswer(null);
-    setSourcesOpen(false);
-    setRunId(null);
-    setSteps(null);
-    setIdemKey(null);
+      setUploading(true);
+      setAnswer(null);
+      setSourcesOpen(false);
+      setRunId(null);
+      setSteps(null);
+      setIdemKey(null);
 
-    setMessages((p) => [...p, { type: "user", content: `${t("uploading_doc")} (${docText.length} chars)` }]);
+      const uploadLabel = pickedFile
+        ? `${t("uploading_doc")} (${pickedFile.name})`
+        : `${t("uploading_doc")} (${docText.length} chars)`;
 
-    try {
-      const up = await apiFetch("/api/kb/upload_text/", {
-        method: "POST",
-        body: {
-          content: docText,
-          language: lang,
-        },
-      });
+      setMessages((p) => [...p, { type: "user", content: uploadLabel }]);
 
-      const id = up?.id ?? up?.document_id ?? up?.doc_id;
-      const st = up?.status ?? up?.state ?? "uploaded";
+      try {
+        let up;
 
-      setDocId(id || null);
-      setDocStatus(st);
+        if (pickedFile) {
+          const fd = new FormData();
+          fd.append("file", pickedFile);
+          fd.append("language", lang);
 
-      setMessages((p) => [
-        ...p,
-        { type: "bot", content: `${t("upload_ok")}\n📊 ID: ${id}\n⏳ Processing (Celery)…` },
-      ]);
+          up = await apiFetch("/api/kb/upload_file/", {
+            method: "POST",
+            body: fd,
+          });
+        } else {
+          up = await apiFetch("/api/kb/upload_text/", {
+            method: "POST",
+            body: {
+              content: docText,
+              language: lang,
+            },
+          });
+        }
 
-      setDocText("");
-    } catch (e) {
-      setMessages((p) => [...p, { type: "bot", content: `${t("upload_failed")}: ${e.message}` }]);
-    } finally {
-      setUploading(false);
+        const id = up?.id ?? up?.document_id ?? up?.doc_id;
+        const st = up?.status ?? up?.state ?? "uploaded";
+
+        setDocId(id || null);
+        setDocStatus(st);
+
+        setMessages((p) => [
+          ...p,
+          { type: "bot", content: `${t("upload_ok")}\n📊 ID: ${id}\n⏳ Processing (Celery)…` },
+        ]);
+
+        setDocText("");
+        setPickedFile(null);
+      } catch (e) {
+        setMessages((p) => [...p, { type: "bot", content: `${t("upload_failed")}: ${e.message}` }]);
+      } finally {
+        setUploading(false);
+      }
     }
-  }
 
   async function handleAsk() {
     if (!question.trim() || !canAsk) return;
@@ -561,7 +594,7 @@ export default function ProductOpsStudio() {
                       value={docText}
                       onChange={(e) => setDocText(e.target.value)}
                       placeholder={t("textarea_ph")}
-                      className="w-full h-64 p-8 rounded-[32px] bg-white border border-slate-200/60 shadow-2xl shadow-slate-200/50 focus:outline-none focus:ring-4 focus:ring-cyan-500/5 transition-all text-sm leading-relaxed resize-none"
+                      className="w-full h-64 p-8 rounded-[32px] bg-white border border-slate-200/60 shadow-2xl shadow-slate-200/50 focus:outline-none focus:ring-4 focus:ring-cyan-500/5 transition-all text-sm leading-relaxed resize-none whitespace-pre-wrap break-words"
                     />
 
                     {/* hidden file input */}
@@ -585,7 +618,7 @@ export default function ProductOpsStudio() {
 
                       <button
                         onClick={handleUpload}
-                        disabled={uploading || !docText.trim()}
+                        disabled={uploading || (!pickedFile && !docText.trim())}
                         className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-bold text-xs flex items-center gap-2 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
@@ -806,4 +839,5 @@ export default function ProductOpsStudio() {
       </main>
     </div>
   );
+
 }

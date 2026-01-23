@@ -66,3 +66,21 @@ __pycache__/
 
 # built ui index
 backend/ui/static/ui/index.html
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Local env / docker junk
+infra/.env.tmp
+*.bak.*
+.DS_Store
+
+# local env (mac dev)
+backend/.env.local
+
+# build artifacts
+backend/ui/static/ui/assets/
+frontend/dist/
+frontend/node_modules/

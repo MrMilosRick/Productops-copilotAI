@@ -1,31 +1,52 @@
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 export async function apiFetch(path, { method = "GET", headers = {}, body } = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      ...(body ? { "Content-Type": "application/json" } : {}),
-      ...headers,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const url = path;
 
-  const raw = await res.text();
-  let data = null;
-  try {
-    data = raw ? JSON.parse(raw) : null;
-  } catch {
-    data = raw;
+  const isFormData =
+    typeof FormData !== "undefined" && body instanceof FormData;
+
+  const isPlainObject =
+    body &&
+    typeof body === "object" &&
+    !Array.isArray(body) &&
+    !isFormData;
+
+  const finalHeaders = { ...headers };
+
+  const init = { method, headers: finalHeaders };
+
+  if (body !== undefined) {
+    if (isFormData) {
+      // IMPORTANT: do NOT set Content-Type manually for FormData
+      init.body = body;
+    } else if (isPlainObject) {
+      finalHeaders["Content-Type"] = finalHeaders["Content-Type"] || "application/json";
+      init.body = JSON.stringify(body);
+    } else {
+      // string / Blob / ArrayBuffer / etc.
+      init.body = body;
+    }
+  }
+
+  const res = await fetch(url, init);
+
+  // Try parse JSON (default), but support text as fallback
+  const ct = res.headers.get("content-type") || "";
+  let data;
+  if (ct.includes("application/json")) {
+    data = await res.json().catch(() => null);
+  } else {
+    data = await res.text().catch(() => "");
   }
 
   if (!res.ok) {
     const msg =
-      (data && (data.detail?.error || data.detail || data.error || data.message)) ||
+      (data && data.detail && (data.detail.error || data.detail)) ||
+      (data && data.error) ||
+      (typeof data === "string" && data) ||
       `HTTP ${res.status}`;
-    const err = new Error(msg);
-    err.status = res.status;
-    err.data = data;
-    throw err;
+    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
   }
 
   return data;

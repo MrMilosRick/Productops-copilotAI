@@ -58,6 +58,7 @@ class IdempotencyKey(models.Model):
     key = models.CharField(max_length=128, unique=True)
     request_hash = models.CharField(max_length=64)
     run = models.ForeignKey("AgentRun", on_delete=models.SET_NULL, null=True, blank=True)
+    response_json = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
 class AgentRun(models.Model):

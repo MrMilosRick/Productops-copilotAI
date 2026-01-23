@@ -40,3 +40,12 @@
 .read-the-docs {
   color: #888;
 }
+
+/* --- UI fix: keep pasted document formatting in textarea --- */
+textarea {
+  white-space: pre-wrap;     /* keep \n */
+  overflow-wrap: anywhere;   /* long lines won't break layout */
+  word-break: break-word;
+  line-height: 1.4;
+  resize: vertical;
+}
