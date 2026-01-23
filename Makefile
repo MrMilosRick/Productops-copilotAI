@@ -17,7 +17,7 @@ health:
 	@i=0; \
 	while [ $$i -lt 60 ]; do \
 		resp=$$(curl -fsS --max-time 2 "$(BASE_URL)/api/health/" 2>/dev/null || true); \
-		if echo "$$resp" | rg -q '"status"\s*:\s*"ok"'; then \
+		if echo "$$resp" | grep -E -q '"status"\s*:\s*"ok"'; then \
 			echo "Health OK"; echo "$$resp"; exit 0; \
 		fi; \
 		i=$$((i+1)); \
