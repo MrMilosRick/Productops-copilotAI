@@ -134,7 +134,7 @@ def kb_upload_text(request):
     ws = get_or_create_default_workspace()
 
     # --- Idempotency: same key + same request_hash => replay stored response_json
-    raw_key = request.headers.get("Idempotency-Key") or request.META.get("HTTP_IDEMPOTENCY_KEY")
+    raw_key = request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key") or request.META.get("HTTP_IDEMPOTENCY_KEY") or request.META.get("HTTP_X_IDEMPOTENCY_KEY")
     idem_key = normalize_idempotency_key(raw_key) if raw_key else None
 
     payload_for_idem = {
@@ -302,7 +302,7 @@ def ask(request):
     ws = get_or_create_default_workspace()
 
     # Idempotency (optional)
-    idem_key = request.headers.get("Idempotency-Key") or request.META.get("HTTP_IDEMPOTENCY_KEY")
+    idem_key = request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key") or request.META.get("HTTP_IDEMPOTENCY_KEY") or request.META.get("HTTP_X_IDEMPOTENCY_KEY")
     if idem_key:
         idem_key = normalize_idempotency_key(idem_key)
 

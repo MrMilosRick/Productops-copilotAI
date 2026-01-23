@@ -341,7 +341,7 @@ export default function ProductOpsStudio() {
     try {
       const data = await apiFetch("/api/ask/", {
         method: "POST",
-        headers: { "X-Idempotency-Key": key },
+        headers: { "Idempotency-Key": key },
         body: {
           question: q,
           document_id: docId,
@@ -396,7 +396,7 @@ export default function ProductOpsStudio() {
       const lastUser = [...messages].reverse().find((m) => m.type === "user")?.content || "";
       const data = await apiFetch("/api/ask/", {
         method: "POST",
-        headers: { "X-Idempotency-Key": idemKey },
+        headers: { "Idempotency-Key": idemKey },
         body: {
           question: lastUser,
           document_id: docId,
