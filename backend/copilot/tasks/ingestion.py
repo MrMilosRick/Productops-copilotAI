@@ -31,6 +31,36 @@ def process_document(self, document_id: int) -> dict:
 
     doc = Document.objects.get(id=document_id)
 
+    # --- extract text from file_path if content is empty ---
+    if not (doc.content or "").strip():
+        path = (doc.file_path or "").strip()
+        if not path:
+            Document.objects.filter(id=document_id).update(status="failed")
+            return {"document_id": int(document_id), "status": "failed", "error": "file_path is empty and content is empty"}
+
+        lower = path.lower()
+        try:
+            if lower.endswith(".pdf") or (doc.mime or "") == "application/pdf":
+                # pdfminer is more tolerant than pypdf for weird PDFs
+                from pdfminer.high_level import extract_text as pdfminer_extract_text
+                extracted = (pdfminer_extract_text(path) or "").strip()
+            else:
+                # best-effort for text-like files
+                with open(path, "rb") as f:
+                    data = f.read()
+                extracted = data.decode("utf-8", errors="replace").strip()
+
+            if not extracted:
+                Document.objects.filter(id=document_id).update(status="failed")
+                return {"document_id": int(document_id), "status": "failed", "error": "extracted text is empty"}
+
+            doc.content = extracted
+            doc.content_hash = sha256_text(doc.content)
+            doc.save(update_fields=["content", "content_hash"])
+        except Exception as e:
+            Document.objects.filter(id=document_id).update(status="failed")
+            return {"document_id": int(document_id), "status": "failed", "error": f"extract failed: {e.__class__.__name__}: {e}"}
+
     try:
         chunks = chunk_text(doc.content or "", max_chars=3500, overlap_chars=300)
 

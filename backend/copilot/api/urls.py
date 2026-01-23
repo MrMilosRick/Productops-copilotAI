@@ -4,10 +4,12 @@ from .views import (
     health,
     kb_upload_text, kb_documents, kb_document_detail,
     ask,
-    runs_list, run_detail, run_steps,
+    runs_list, run_detail, run_steps,    kb_upload_file,
+
 )
 
 urlpatterns = [
+    path("kb/upload_file/", kb_upload_file),
     path("", api_index),
     path("health/", health),
 

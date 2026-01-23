@@ -1,6 +1,7 @@
 import hashlib
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, parser_classes
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework import status
 
 from copilot.models import Workspace, KnowledgeSource, Document, AgentRun, AgentStep, IdempotencyKey
@@ -186,6 +187,96 @@ def kb_upload_text(request):
 
     return Response(resp, status=status.HTTP_201_CREATED)
 
+
+
+
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def kb_upload_file(request):
+    """
+    Multipart upload:
+      - file: multipart field 'file'
+      - title: optional (fallback to filename)
+
+    Stores file under MEDIA_ROOT/ws_<id>/ and extracts text:
+      - PDF: pypdf first, then pdfminer.six fallback
+      - non-PDF: utf-8 decode (best-effort)
+    """
+    ws = get_or_create_default_workspace()
+    src = get_or_create_upload_source(ws)
+
+    upload = request.FILES.get("file")
+    if upload is None:
+        return Response({"detail": {"error": "file is required (multipart field 'file')"}}, status=400)
+
+    title = (request.POST.get("title") or upload.name or "Upload").strip()
+    filename = upload.name or ""
+    mime = getattr(upload, "content_type", "") or ""
+
+    from django.conf import settings
+    from pathlib import Path as _Path
+
+    ws_dir = _Path(settings.MEDIA_ROOT) / f"ws_{ws.id}"
+    ws_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = (filename or "upload").replace("/", "_").replace("\\", "_")
+    file_path = ws_dir / safe_name
+
+    with open(file_path, "wb") as f:
+        for chunk in upload.chunks():
+            f.write(chunk)
+
+    lower = safe_name.lower()
+
+    # --- extract text ---
+    text = ""
+    if lower.endswith(".pdf") or mime == "application/pdf":
+        # 1) pypdf
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(str(file_path))
+            parts = []
+            for page in reader.pages:
+                try:
+                    parts.append(page.extract_text() or "")
+                except Exception:
+                    parts.append("")
+            text = "\n".join(parts).strip()
+        except Exception:
+            text = ""
+
+        # 2) pdfminer fallback if pypdf failed/empty
+        if not text:
+            try:
+                from pdfminer.high_level import extract_text as pdfminer_extract_text
+                text = (pdfminer_extract_text(str(file_path)) or "").strip()
+            except Exception as e2:
+                return Response({"detail": {"error": "failed to parse pdf: pdfminer=" + e2.__class__.__name__ + ": " + str(e2)}}, status=400)
+    else:
+        try:
+            data = file_path.read_bytes()
+            text = data.decode("utf-8", errors="replace").strip()
+        except Exception as e:
+            return Response({"detail": {"error": "failed to read file: " + e.__class__.__name__ + ": " + str(e)}}, status=400)
+
+    if not text:
+        return Response({"detail": {"error": "extracted text is empty"}}, status=400)
+
+    # persist doc + enqueue embedding
+    content_hash = sha256_text(text)
+    doc = Document.objects.create(
+        workspace=ws,
+        source=src,
+        title=title,
+        filename=filename,
+        mime=(mime or ("application/pdf" if lower.endswith(".pdf") else "application/octet-stream")),
+        file_path=str(file_path),
+        content=text,
+        content_hash=content_hash,
+        status="uploaded",
+    )
+    process_document.delay(doc.id)
+    return Response({"document_id": doc.id, "status": doc.status, "queued": True}, status=201)
 
 @api_view(["GET"])
 def kb_documents(request):
@@ -377,7 +468,7 @@ def ask(request):
         llm_used = "none"
 
         if retriever == "keyword":
-            retrieved = keyword_retrieve(ws.id, question, top_k=top_k)
+            retrieved = keyword_retrieve(ws.id, question, top_k=top_k, document_id=document_id)
             retriever_used = "keyword"
 
         elif retriever == "vector":

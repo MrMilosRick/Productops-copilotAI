@@ -27,6 +27,7 @@ class Document(models.Model):
     title = models.CharField(max_length=255)
     filename = models.CharField(max_length=255, blank=True, default="")
     mime = models.CharField(max_length=100, blank=True, default="text/plain")
+    file_path = models.CharField(max_length=512, blank=True, default="")
 
     content = models.TextField()
     content_hash = models.CharField(max_length=64, db_index=True)

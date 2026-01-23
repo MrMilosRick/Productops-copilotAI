@@ -1,10 +1,11 @@
 from pathlib import Path
+import os
 import environ
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 env = environ.Env(DEBUG=(bool, False))
-DEBUG = env("DEBUG", default=False)
+DEBUG = os.getenv("DJANGO_DEBUG", "0") == "1"
 
 SECRET_KEY = env("SECRET_KEY", default="dev-secret-key")
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
@@ -78,6 +79,10 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Media (uploaded files)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'uploads'
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -96,3 +101,15 @@ CELERY_RESULT_BACKEND = REDIS_URL
 
 # Celery 6 compatibility
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+# --- DRF: API is stateless (disable SessionAuthentication/CSRF) ---
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.BasicAuthentication",
+        "rest_framework.authentication.TokenAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.AllowAny",
+    ],
+}
+

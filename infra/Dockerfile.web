@@ -12,7 +12,8 @@ RUN addgroup --system app && adduser --system --ingroup app app
 
 # python deps
 COPY backend/requirements/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r /app/requirements.txt
 
 # copy ONLY backend code
 COPY backend /app/backend

@@ -53,6 +53,32 @@ def keyword_retrieve(workspace_id: int, query: str, top_k: int = 5, document_id:
 
     candidates = candidates.order_by("-id")[:50]
 
+    # Fallback: if term-match returns no candidates, return latest chunks (demo-friendly, still grounded).
+    if not candidates.exists():
+        fb = (
+            EmbeddingChunk.objects
+            .select_related("document")
+            .filter(document__workspace_id=workspace_id)
+        )
+        if document_id is not None:
+            fb = fb.filter(document_id=int(document_id))
+
+        fb = fb.order_by("-id")[:top_k]
+
+        out: List[Dict[str, Any]] = []
+        for ch in fb:
+            out.append({
+                "document_id": ch.document_id,
+                "document_title": ch.document.title,
+                "chunk_id": ch.id,
+                "chunk_index": ch.chunk_index,
+                "matched_terms": [],
+                "score": 0,
+                "snippet": ch.text[:300],
+            })
+        return out
+
+
     results: List[Dict[str, Any]] = []
     for ch in candidates:
         text_l = ch.text.lower()
