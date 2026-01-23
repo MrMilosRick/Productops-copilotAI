@@ -13,9 +13,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Prepare compose env
+        run: |
+          cp -n infra/.env.example infra/.env 2>/dev/null || true
+          test -f infra/.env || touch infra/.env
+
       - name: Run smoke
         run: |
-          make -C infra smoke
+          make ci-smoke
 
       - name: Dump compose logs on failure
         if: failure()

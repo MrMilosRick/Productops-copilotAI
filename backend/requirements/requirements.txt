@@ -14,3 +14,9 @@ gunicorn==23.0.0
 # langchain
 # langgraph
 openai>=1.0.0
+
+whitenoise==6.6.0
+
+# file upload extract
+pypdf>=5.0.0
+python-docx>=1.1.0

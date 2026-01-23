@@ -1,0 +1,5 @@
+@import "tailwindcss";
+
+/* small sane defaults */
+html, body, #root { height: 100%; }
+body { margin: 0; background: #F8FAFC; color: #0f172a; }

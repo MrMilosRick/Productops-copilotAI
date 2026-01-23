@@ -19,6 +19,7 @@ from copilot.services.vector_retriever import vector_retrieve
 from copilot.services.hybrid_retriever import hybrid_retrieve
 from copilot.services.idempotency import normalize_idempotency_key
 from copilot.services.llm import rag_answer_openai
+import uuid
 
 @api_view(["GET"])
 def health(request):
@@ -51,16 +52,34 @@ def deterministic_synthesis(question: str, retrieved: list[dict]) -> str:
 def request_hash(payload: dict) -> str:
     """Hash request payload for idempotency safety (must include all behavior-changing fields)."""
     import json
-    stable = {
-        "mode": payload.get("mode"),
-        "question": payload.get("question"),
-        "retriever": payload.get("retriever"),
-        "top_k": payload.get("top_k"),
-        "document_id": payload.get("document_id"),
-        "answer_mode": payload.get("answer_mode"),
-    }
+
+    mode = payload.get("mode")
+
+    # Support both:
+    # - ask(): question/retriever/top_k/document_id/answer_mode
+    # - kb_upload_text(): title/content (legacy 'text' too)
+    if mode == "kb_upload_text" or payload.get("content") is not None or payload.get("text") is not None:
+        stable = {
+            "mode": mode or "kb_upload_text",
+            "workspace_id": payload.get("workspace_id"),
+            "actor_id": payload.get("actor_id"),
+            "title": payload.get("title"),
+            "content": payload.get("content"),
+            "text": payload.get("text"),
+        }
+    else:
+        stable = {
+            "mode": payload.get("mode"),
+            "question": payload.get("question"),
+            "retriever": payload.get("retriever"),
+            "top_k": payload.get("top_k"),
+            "document_id": payload.get("document_id"),
+            "answer_mode": payload.get("answer_mode"),
+        }
+
     blob = json.dumps(stable, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
+
 
 def get_or_create_default_workspace() -> Workspace:
     ws, _ = Workspace.objects.get_or_create(name="default")
@@ -76,14 +95,75 @@ def get_or_create_upload_source(ws: Workspace) -> KnowledgeSource:
 
 @api_view(["POST"])
 def kb_upload_text(request):
-    ser = UploadTextSerializer(data=request.data)
-    ser.is_valid(raise_exception=True)
-    title = ser.validated_data["title"]
-    content = ser.validated_data["content"]
+    data = request.data if isinstance(request.data, dict) else {}
+
+    ser = UploadTextSerializer(data=data)
+    if not ser.is_valid():
+        err = ser.errors
+        msg = None
+
+        if isinstance(err, dict):
+            # prefer our custom shape first
+            if "error" in err:
+                msg = err["error"]
+                if isinstance(msg, list) and msg:
+                    msg = msg[0]
+            # DRF common shapes
+            elif "non_field_errors" in err:
+                msg = err["non_field_errors"]
+                if isinstance(msg, list) and msg:
+                    msg = msg[0]
+            elif "content" in err:
+                msg = err["content"]
+                if isinstance(msg, list) and msg:
+                    msg = msg[0]
+            elif "text" in err:
+                msg = err["text"]
+                if isinstance(msg, list) and msg:
+                    msg = msg[0]
+
+        if not msg:
+            msg = "content is required"
+
+        return Response({"detail": {"error": msg}}, status=400)
+
+    title = (ser.validated_data.get("title") or "").strip()
+    content = (ser.validated_data.get("content") or "").strip()
+    title_for_hash = title
 
     ws = get_or_create_default_workspace()
-    src = get_or_create_upload_source(ws)
 
+    # --- Idempotency: same key + same request_hash => replay stored response_json
+    raw_key = request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key") or request.META.get("HTTP_IDEMPOTENCY_KEY") or request.META.get("HTTP_X_IDEMPOTENCY_KEY")
+    idem_key = normalize_idempotency_key(raw_key) if raw_key else None
+
+    payload_for_idem = {
+        "mode": "kb_upload_text",
+        "workspace_id": ws.id,
+        "actor_id": (request.user.id if getattr(request.user, "is_authenticated", False) else None),
+        "title": title_for_hash,
+        "content": content,
+    }
+    r_hash = request_hash(payload_for_idem)
+
+    if idem_key:
+        existing = IdempotencyKey.objects.filter(key=idem_key).first()
+        if existing:
+            if (existing.request_hash or "") != r_hash:
+                return Response(
+                    {"detail": {"error": "Idempotency-Key already used for a different request"}, "idempotency_key": idem_key},
+                    status=409,
+                )
+            if existing.response_json is not None:
+                return Response(existing.response_json, status=200)
+            # fallback: stable response if record exists but response_json missing
+            return Response({"detail": {"error": "idempotent replay missing stored response"}}, status=200)
+
+    # --- Create doc + enqueue processing
+    if not title:
+        title = f"Text Upload #{uuid.uuid4().hex[:8]}"
+
+    src = get_or_create_upload_source(ws)
     doc = Document.objects.create(
         workspace=ws,
         source=src,
@@ -96,7 +176,16 @@ def kb_upload_text(request):
     )
     process_document.delay(doc.id)
 
-    return Response({"document_id": doc.id, "status": "uploaded", "queued": True}, status=status.HTTP_201_CREATED)
+    resp = {"document_id": doc.id, "status": "uploaded", "queued": True}
+
+    if idem_key:
+        IdempotencyKey.objects.update_or_create(
+            key=idem_key,
+            defaults={"workspace": ws, "request_hash": r_hash, "run": None, "response_json": resp},
+        )
+
+    return Response(resp, status=status.HTTP_201_CREATED)
+
 
 @api_view(["GET"])
 def kb_documents(request):
@@ -160,7 +249,34 @@ def normalize_source(r: dict) -> dict:
 @api_view(["POST"])
 def ask(request):
     ser = AskSerializer(data=request.data)
-    ser.is_valid(raise_exception=True)
+    try:
+        ser.is_valid(raise_exception=True)
+    except Exception as e:
+        # normalize DRF ValidationError -> {"detail": {"error": "..."}}
+        err = getattr(e, "detail", None)
+        msg = None
+        if isinstance(err, dict):
+            # typical shapes: {"field": ["..."]} or {"non_field_errors": ["..."]}
+            if "non_field_errors" in err:
+                msg = err.get("non_field_errors")
+            else:
+                # take first field error
+                for _k, _v in err.items():
+                    msg = _v
+                    break
+            if isinstance(msg, list) and msg:
+                msg = msg[0]
+        elif isinstance(err, list) and err:
+            msg = err[0]
+        if not msg:
+            msg = "invalid request"
+        _m = str(msg)
+        # optional: make a couple messages friendlier/stable
+        if _m == "This field is required.":
+            _m = "question is required"
+        if _m == "This field may not be blank.":
+            _m = "question may not be blank"
+        return Response({"detail": {"error": _m}}, status=400)
 
     question = ser.validated_data["question"]
     mode = ser.validated_data.get("mode", "answer")
@@ -172,12 +288,21 @@ def ask(request):
         or ser.validated_data.get("answer_mode")
         or "sources_only"
     )
+    # accept UI-friendly alias
+    # answer_mode="answer" -> use real implementation branch
+    if answer_mode in ("answer", "llm"):
+        answer_mode = "langchain_rag"
+
+    # keep run.mode aligned with effective behavior
+    if mode == "answer":
+        mode = answer_mode
+
     if document_id is not None:
         document_id = int(document_id)
     ws = get_or_create_default_workspace()
 
     # Idempotency (optional)
-    idem_key = request.headers.get("Idempotency-Key") or request.META.get("HTTP_IDEMPOTENCY_KEY")
+    idem_key = request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key") or request.META.get("HTTP_IDEMPOTENCY_KEY") or request.META.get("HTTP_X_IDEMPOTENCY_KEY")
     if idem_key:
         idem_key = normalize_idempotency_key(idem_key)
 
@@ -313,7 +438,7 @@ def ask(request):
         run.status = "success"
         if answer_mode == "sources_only":
             llm_used = "none"
-            run.final_output = ""
+            run.final_output = deterministic_synthesis(question, retrieved)
         elif answer_mode == "deterministic":
             llm_used = "none"
             run.final_output = deterministic_synthesis(question, retrieved)

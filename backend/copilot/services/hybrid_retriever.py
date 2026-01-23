@@ -28,11 +28,7 @@ def hybrid_retrieve(workspace_id: int, question: str, top_k: int = 5, document_i
 
     query_vec = embed_texts([question])[0] if (question or "").strip() else []
     v_res = vector_retrieve(workspace_id, query_vec, top_k=expand, document_id=document_id) if query_vec else []
-    k_res = []
-    if document_id is None:
-            k_res = []  # HYBRID_DOCID_GUARD
-    if document_id is None:
-        k_res = keyword_retrieve(workspace_id, question, top_k=expand)
+    k_res = keyword_retrieve(workspace_id, question, top_k=expand, document_id=document_id)
 
     merged: Dict[int, Dict[str, Any]] = {}
 
