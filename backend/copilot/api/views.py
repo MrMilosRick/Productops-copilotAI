@@ -517,3 +517,23 @@ def run_steps(request, run_id: int):
     run = AgentRun.objects.get(workspace=ws, id=run_id)
     steps = run.steps.order_by("id")
     return Response(AgentStepSerializer(steps, many=True).data)
+from django.http import JsonResponse
+
+def api_index(request):
+    return JsonResponse({
+        "service": "ProductOps Copilot API",
+        "endpoints": {
+            "health": "/api/health/",
+            "upload_text": "/api/kb/upload_text/",
+            "documents": "/api/kb/documents/",
+            "document_detail": "/api/kb/documents/<id>/",
+            "ask": "/api/ask/",
+            "runs": "/api/runs/",
+            "run_detail": "/api/runs/<id>/",
+            "run_steps": "/api/runs/<id>/steps/",
+        },
+        "quickstart": {
+            "health": "curl -fsS http://localhost:8001/api/health/ | jq .",
+            "upload_text": "curl -fsS -X POST http://localhost:8001/api/kb/upload_text/ -H 'Content-Type: application/json' -d '{\"title\":\"t\",\"content\":\"hello\"}' | jq .",
+        }
+    })

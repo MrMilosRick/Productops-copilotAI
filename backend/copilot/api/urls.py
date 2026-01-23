@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import (
+    api_index,
     health,
     kb_upload_text, kb_documents, kb_document_detail,
     ask,
@@ -7,6 +8,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("", api_index),
     path("health/", health),
 
     path("kb/upload_text/", kb_upload_text),
