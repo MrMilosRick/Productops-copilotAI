@@ -292,12 +292,19 @@ def build_answer_from_retrieved(retrieved):
         lines.append(f"{i}. [{title}] {snip}")
     return "\n\n".join(lines)
 
+def sanitize_sources(items):
+    """Copy each source dict and remove full chunk text to avoid leaking in API/DB."""
+    out = [dict(r or {}) for r in (items or [])]
+    for d in out:
+        d.pop("text", None)
+    return out
+
 def get_sources_from_run(run: AgentRun):
     step = run.steps.filter(name="retrieve_context").order_by("-id").first()
     if not step:
         return []
     out = step.output_json or {}
-    return out.get("results", []) or []
+    return sanitize_sources(out.get("results", []) or [])
 
 def normalize_source(r: dict) -> dict:
     # normalize payload so sources in replay == sources in normal response
@@ -471,7 +478,7 @@ def ask(request):
             run=run,
             name="retrieve_context",
             input_json={"question": question, "top_k": top_k, "retriever": retriever, "document_id": document_id},
-            output_json={"results": retrieved, "retriever_used": retriever_used},
+            output_json={"results": sanitize_sources(retrieved), "retriever_used": retriever_used},
             status="ok",
         )
 
@@ -524,7 +531,7 @@ def ask(request):
             run.status = "error"
             run.error = f"unknown answer_mode: {answer_mode}"
             run.save(update_fields=["status","error"])
-            return Response({"run_id": run.id, "error": run.error, "sources": retrieved, "retriever_used": retriever_used, "llm_used": "none", "answer_mode": answer_mode}, status=400)
+            return Response({"run_id": run.id, "error": run.error, "sources": sanitize_sources(retrieved), "retriever_used": retriever_used, "llm_used": "none", "answer_mode": answer_mode}, status=400)
         run.save(update_fields=["status", "final_output"])
 
 
@@ -553,7 +560,7 @@ def ask(request):
             pass
 
         return Response(
-            {"run_id": run.id, "answer": run.final_output, "sources": retrieved, "retriever_used": retriever_used, "llm_used": llm_used, "answer_mode": answer_mode}
+            {"run_id": run.id, "answer": run.final_output, "sources": sanitize_sources(retrieved), "retriever_used": retriever_used, "llm_used": llm_used, "answer_mode": answer_mode}
         )
 
     except Exception as e:

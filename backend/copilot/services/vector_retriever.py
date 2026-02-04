@@ -41,6 +41,7 @@ def vector_retrieve(workspace_id: int, query_vector: List[float], top_k: int = 5
             "distance": dist,
             "score": score,
             "snippet": ch.text[:300],
+            "text": ch.text,
         })
 
     return results

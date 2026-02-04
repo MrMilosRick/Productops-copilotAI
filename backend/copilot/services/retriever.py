@@ -75,6 +75,7 @@ def keyword_retrieve(workspace_id: int, query: str, top_k: int = 5, document_id:
                 "matched_terms": [],
                 "score": 0,
                 "snippet": ch.text[:300],
+                "text": ch.text,
             })
         return out
 
@@ -98,6 +99,7 @@ def keyword_retrieve(workspace_id: int, query: str, top_k: int = 5, document_id:
             "matched_terms": matched,
             "score": score,
             "snippet": ch.text[:300],
+            "text": ch.text,
         })
 
     results.sort(key=lambda r: (r["score"], r["chunk_id"]), reverse=True)

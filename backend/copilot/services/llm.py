@@ -25,9 +25,9 @@ def rag_answer_openai(question: str, retrieved: List[Dict[str, Any]]) -> Dict[st
     ctx_lines = []
     for i, r in enumerate(retrieved, start=1):
         title = (r or {}).get("document_title", "")
-        snip = ((r or {}).get("snippet", "") or "").strip()
-        snip = snip[:800]  # hard cap per snippet
-        ctx_lines.append(f"[{i}] {title}\n{snip}")
+        block = ((r or {}).get("text") or (r or {}).get("snippet") or "").strip()
+        block = block[:3500]  # cap per block to avoid huge prompts
+        ctx_lines.append(f"[{i}] {title}\n{block}")
 
     context = "\n\n".join(ctx_lines).strip()
 
