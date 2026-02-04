@@ -150,6 +150,12 @@ def wait_document_ready(doc_id: int) -> Dict[str, Any]:
         time.sleep(1)
     die(f"Document {doc_id} not ready after {TIMEOUT_S}s")
 
+def assert_sources_no_full_text(sources: Any) -> None:
+    """Regression: API must never return full chunk text in sources."""
+    for s in (sources or []):
+        if isinstance(s, dict) and "text" in s:
+            die("SECURITY: sources must not contain full text")
+
 def ask(question: str, doc_id: int, *, answer_mode: str, idem_key: Optional[str] = None, top_k: int = 1) -> Tuple[int, Any, str]:
     payload = {
         "question": question,
@@ -190,6 +196,7 @@ def main() -> None:
     code_c, data_c, raw_c = ask("What is the unicorn id?", d1, answer_mode=answer_mode, top_k=5)
     if code_c != 200 or not isinstance(data_c, dict):
         die(f"Constraint ask failed: {code_c} {raw_c[:400]}")
+    assert_sources_no_full_text(data_c.get("sources"))
     bad = [s for s in (data_c.get("sources") or []) if isinstance(s, dict) and s.get("document_id") != d1]
     if bad:
         die(f"Sources not constrained to document_id={d1}: bad={bad}")
@@ -198,6 +205,7 @@ def main() -> None:
     code, data, raw = ask(q, doc_id, answer_mode=answer_mode)
     if code != 200 or not isinstance(data, dict):
         die(f"/api/ask failed: {code} {raw[:400]}")
+    assert_sources_no_full_text(data.get("sources"))
 
     if not data.get("answer"):
         die(f"Empty answer: {data}")
@@ -210,6 +218,12 @@ def main() -> None:
         die(f"Unicorn token not found. UNICORN={UNICORN}\nanswer={answer_text}\nsnippets={snippets}")
 
     ok(f"Ask OK: run_id={data.get('run_id')} llm_used={data.get('llm_used')} answer_mode={data.get('answer_mode')}")
+
+    code_so, data_so, raw_so = ask(q, doc_id, answer_mode="sources_only")
+    if code_so != 200 or not isinstance(data_so, dict):
+        die(f"sources_only ask failed: {code_so} {raw_so[:400]}")
+    assert_sources_no_full_text(data_so.get("sources"))
+    ok("sources_only: no full text in sources")
 
     idem = f"smoke-idem-{int(time.time())}"
     c1, d1, r1 = ask(q, doc_id, answer_mode=answer_mode, idem_key=idem, top_k=1)
