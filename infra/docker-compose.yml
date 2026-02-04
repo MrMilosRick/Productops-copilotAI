@@ -15,6 +15,14 @@ services:
       - "6379:6379"
     restart: unless-stopped
 
+  uploads-init:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    volumes:
+      - copilot_uploads:/app/uploads
+    command: ["sh", "-lc", "mkdir -p /app/uploads && (chown -R 100:101 /app/uploads || true)"]
+
   web:
     build:
       context: ../backend
@@ -22,24 +30,24 @@ services:
     env_file:
       - ../.env
     depends_on:
-      - db
-      - redis
+      db: { condition: service_started }
+      redis: { condition: service_started }
+      uploads-init: { condition: service_completed_successfully }
     ports:
       - "8001:8000"
     restart: unless-stopped
-    user: "0:0"
+    user: "100:101"
     volumes:
       - copilot_uploads:/app/uploads
     command: >
       bash -lc "
-      mkdir -p /app/uploads && chown -R app:app /app/uploads &&
       echo 'Waiting for DB...' &&
       for i in {1..60}; do
         python -c \"import os, psycopg; host=os.getenv('POSTGRES_HOST','db'); port=int(os.getenv('POSTGRES_PORT','5432')); db=os.getenv('POSTGRES_DB','copilot'); user=os.getenv('POSTGRES_USER','copilot'); pw=os.getenv('POSTGRES_PASSWORD','copilot'); psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw, connect_timeout=2).close(); print('DB ready')\" && break || true
         echo '...still waiting' && sleep 1
       done &&
       python manage.py migrate &&
-      python manage.py runserver 0.0.0.0:8000
+      gunicorn app.wsgi:application --bind 0.0.0.0:8000 --access-logfile - --error-logfile - --log-level info --capture-output
       "
 
   worker:
@@ -49,14 +57,15 @@ services:
     env_file:
       - ../.env
     depends_on:
-      - db
-      - redis
+      db: { condition: service_started }
+      redis: { condition: service_started }
+      uploads-init: { condition: service_completed_successfully }
     restart: unless-stopped
-    user: "0:0"
+    user: "100:101"
     volumes:
       - copilot_uploads:/app/uploads
     command: >
-      bash -lc "mkdir -p /app/uploads && chown -R app:app /app/uploads && celery -A app worker -l INFO"
+      bash -lc "celery -A app worker -l INFO"
 
 volumes:
   copilot_pgdata:
