@@ -15,8 +15,8 @@ jobs:
 
       - name: Prepare compose env
         run: |
-          cp -n infra/.env.example infra/.env 2>/dev/null || true
-          test -f infra/.env || touch infra/.env
+          cp -n infra/.env.example .env 2>/dev/null || true
+          test -f .env || touch .env
 
       - name: Run smoke
         run: |
