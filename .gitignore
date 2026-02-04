@@ -84,3 +84,10 @@ backend/.env.local
 backend/ui/static/ui/assets/
 frontend/dist/
 frontend/node_modules/
+openai_resp_dump.json
+
+# local artifacts
+/data/
+
+# local test data
+/data/

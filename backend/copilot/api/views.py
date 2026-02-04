@@ -228,30 +228,11 @@ def kb_upload_file(request):
 
     lower = safe_name.lower()
 
-    # --- extract text ---
+    # --- extract text (PDF: worker extracts via pdfminer in process_document) ---
     text = ""
     if lower.endswith(".pdf") or mime == "application/pdf":
-        # 1) pypdf
-        try:
-            from pypdf import PdfReader
-            reader = PdfReader(str(file_path))
-            parts = []
-            for page in reader.pages:
-                try:
-                    parts.append(page.extract_text() or "")
-                except Exception:
-                    parts.append("")
-            text = "\n".join(parts).strip()
-        except Exception:
-            text = ""
-
-        # 2) pdfminer fallback if pypdf failed/empty
-        if not text:
-            try:
-                from pdfminer.high_level import extract_text as pdfminer_extract_text
-                text = (pdfminer_extract_text(str(file_path)) or "").strip()
-            except Exception as e2:
-                return Response({"detail": {"error": "failed to parse pdf: pdfminer=" + e2.__class__.__name__ + ": " + str(e2)}}, status=400)
+        # Leave content empty; worker will extract via pdfminer in process_document
+        pass
     else:
         try:
             data = file_path.read_bytes()
@@ -259,7 +240,9 @@ def kb_upload_file(request):
         except Exception as e:
             return Response({"detail": {"error": "failed to read file: " + e.__class__.__name__ + ": " + str(e)}}, status=400)
 
-    if not text:
+    text = (text or "").replace("\x00", "")
+    is_pdf = lower.endswith(".pdf") or mime == "application/pdf"
+    if not text and not is_pdf:
         return Response({"detail": {"error": "extracted text is empty"}}, status=400)
 
     # persist doc + enqueue embedding

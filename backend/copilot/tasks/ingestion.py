@@ -50,6 +50,7 @@ def process_document(self, document_id: int) -> dict:
                     data = f.read()
                 extracted = data.decode("utf-8", errors="replace").strip()
 
+            extracted = (extracted or "").replace("\x00", "").replace("\x0c", "").strip()
             if not extracted:
                 Document.objects.filter(id=document_id).update(status="failed")
                 return {"document_id": int(document_id), "status": "failed", "error": "extracted text is empty"}
@@ -62,7 +63,7 @@ def process_document(self, document_id: int) -> dict:
             return {"document_id": int(document_id), "status": "failed", "error": f"extract failed: {e.__class__.__name__}: {e}"}
 
     try:
-        chunks = chunk_text(doc.content or "", max_chars=3500, overlap_chars=300)
+        chunks = chunk_text(doc.content or "", max_chars=1000, overlap_chars=150)
 
         with transaction.atomic():
             # Rebuild chunks deterministically
