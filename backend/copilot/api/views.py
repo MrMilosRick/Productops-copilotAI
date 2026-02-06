@@ -690,6 +690,8 @@ def ask(request):
             "document_id": document_id,
             "top_k": top_k,
         }
+        if document_id is not None and retrieved and has_kw_hit:
+            relevant = True
 
         if answer_mode == "sources_only":
             AgentStep.objects.create(
