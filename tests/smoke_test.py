@@ -72,8 +72,6 @@ def try_upload_text() -> Tuple[int, Dict[str, Any]]:
     candidates = [
         "/api/kb/upload_text/",
         "/api/kb/upload_text",
-"/api/kb/upload_text/",
-"/api/kb/upload_text/",
         "/api/kb/documents/",
         "/api/kb/documents/",
     ]
@@ -201,7 +199,7 @@ def main() -> None:
     if bad:
         die(f"Sources not constrained to document_id={d1}: bad={bad}")
 
-    q = "What is the unicorn id?"
+    q = UNICORN
     code, data, raw = ask(q, doc_id, answer_mode=answer_mode)
     if code != 200 or not isinstance(data, dict):
         die(f"/api/ask failed: {code} {raw[:400]}")
@@ -212,12 +210,29 @@ def main() -> None:
     if not isinstance(data.get("sources"), list) or len(data["sources"]) < 1:
         die(f"Missing sources: {data}")
 
+    # --- contract: doc questions must route to doc_rag (or summary fast-path) and return sources ---
+    route_doc = str(data.get("route", "") or "")
+    if route_doc not in {"doc_rag", "summary"}:
+        die(f"Expected doc route (doc_rag/summary), got route={route_doc}: {data}")
+
     answer_text = str(data.get("answer", ""))
     snippets = " ".join([str(s.get("snippet", "")) for s in data.get("sources", []) if isinstance(s, dict)])
     if UNICORN not in answer_text and UNICORN not in snippets:
         die(f"Unicorn token not found. UNICORN={UNICORN}\nanswer={answer_text}\nsnippets={snippets}")
 
     ok(f"Ask OK: run_id={data.get('run_id')} llm_used={data.get('llm_used')} answer_mode={data.get('answer_mode')}")
+
+    # --- contract: non-document questions must route to general and omit sources ---
+    q_general = "What is the capital of Sweden?"
+    code_g, data_g, raw_g = ask(q_general, doc_id, answer_mode="deterministic", top_k=5)
+    if code_g != 200 or not isinstance(data_g, dict):
+        die(f"General ask failed: {code_g} {raw_g[:400]}")
+    assert_sources_no_full_text(data_g.get("sources"))
+    route_g = str(data_g.get("route", "") or "")
+    if route_g != "general":
+        die(f"Expected general route, got route={route_g}: {data_g}")
+    if data_g.get("sources"):
+        die(f"Expected empty sources for general route, got: {data_g.get('sources')}")
 
     code_so, data_so, raw_so = ask(q, doc_id, answer_mode="sources_only")
     if code_so != 200 or not isinstance(data_so, dict):
