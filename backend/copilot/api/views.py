@@ -617,6 +617,22 @@ def ask(request):
             run.status = "success"
             run.final_output = out.get("answer", "")
             run.save(update_fields=["status", "final_output"])
+            try:
+                if hasattr(run, "llm_used"):
+                    run.llm_used = llm_used
+                    run.save(update_fields=["llm_used"])
+            except Exception:
+                pass
+            try:
+                AgentStep.objects.create(
+                    run=run,
+                    name="generate_answer",
+                    input_json={"question": question, "answer_mode": answer_mode, "document_id": document_id},
+                    output_json={"llm_used": llm_used, "answer_mode": answer_mode, "route": "summary", "answer_preview": (run.final_output or "")[:500]},
+                    status="success",
+                )
+            except Exception:
+                pass
             return Response({
                 "run_id": run.id,
                 "answer": _strip_noise_sections(run.final_output or ""),
@@ -758,10 +774,10 @@ def ask(request):
                 "run_id": run.id,
                 "answer": _strip_noise_sections(run.final_output or ""),
                 "sources": [],
-                "retriever_used": retriever_used,
+                "retriever_used": "general",
                 "llm_used": llm_used,
                 "answer_mode": answer_mode,
-                "route": "doc_rag",
+                "route": "general",
                 "notice": "",
                 "debug": debug_payload,
             })
