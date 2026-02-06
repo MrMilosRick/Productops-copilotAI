@@ -62,7 +62,7 @@ const I18N = {
     index_base: "Index Base",
     upload_file: "Upload file",
     file_loaded: "📎 File loaded into editor",
-    unsupported_file: "⚠️ Unsupported file type (use .txt/.md/.csv/.json)",
+    unsupported_file: "⚠️ Unsupported file type (use .txt/.md/.csv/.json/.pdf)",
     generating_embeddings: "Generating Embeddings...",
     ask_ph: "Ask the studio…",
     sources_used: "SOURCES USED",
@@ -108,7 +108,7 @@ const I18N = {
     index_base: "Обработать данные",
     upload_file: "Выбрать файл",
     file_loaded: "📎 Файл загружен в редактор",
-    unsupported_file: "⚠️ Неподдерживаемый тип (используй .txt/.md/.csv/.json)",
+    unsupported_file: "⚠️ Неподдерживаемый тип (используй .txt/.md/.csv/.json/.pdf)",
     generating_embeddings: "Считаю эмбеддинги…",
     ask_ph: "Задайте вопрос…",
     sources_used: "ИСТОЧНИКОВ",
@@ -149,6 +149,7 @@ export default function ProductOpsStudio() {
 
   const [docText, setDocText] = useState("");
   const [pickedFile, setPickedFile] = useState(null);
+  const [pdfUrl, setPdfUrl] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [docId, setDocId] = useState(null);
   const [docStatus, setDocStatus] = useState(null);
@@ -231,20 +232,65 @@ export default function ProductOpsStudio() {
     fileInputRef.current?.click();
   }
 
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    };
+  }, [pdfUrl]);
+
+  function formatKb(bytes) {
+    if (!Number.isFinite(bytes)) return "";
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+
+  function clearPickedFile() {
+    try {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    } catch {
+      // ignore
+    }
+    setPdfUrl(null);
+    setPickedFile(null);
+    setDocText("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   async function onPickFile(e) {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      const ok = /\.(txt|md|csv|json)$/i.test(file.name);
+      const ok = /\.(txt|md|csv|json|pdf)$/i.test(file.name);
       if (!ok) {
         setMessages((p) => [...p, { type: "system", content: t("unsupported_file") }]);
         e.target.value = "";
         return;
       }
 
+      // cleanup previous pdf preview (if any)
+      if (pdfUrl) {
+        try {
+          URL.revokeObjectURL(pdfUrl);
+        } catch {
+          // ignore
+        }
+        setPdfUrl(null);
+      }
+
       setPickedFile(file);
 
       // Preview text in textarea (nice UX); backend still receives the original file.
+      const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
+      if (isPdf) {
+        const url = URL.createObjectURL(file);
+        setPdfUrl(url);
+        setDocText("");
+        setMessages((p) => [
+          ...p,
+          { type: "system", content: `${t("file_loaded")}: ${file.name} (${formatKb(file.size)})` },
+        ]);
+        e.target.value = "";
+        return;
+      }
       try {
         const text = await file.text();
         setDocText(text);
@@ -314,8 +360,17 @@ export default function ProductOpsStudio() {
           { type: "bot", content: `${t("upload_ok")}\n📊 ID: ${id}\n⏳ Processing (Celery)…` },
         ]);
 
+        if (pdfUrl) {
+          try {
+            URL.revokeObjectURL(pdfUrl);
+          } catch {
+            // ignore
+          }
+        }
+        setPdfUrl(null);
         setDocText("");
         setPickedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
       } catch (e) {
         setMessages((p) => [...p, { type: "bot", content: `${t("upload_failed")}: ${e.message}` }]);
       } finally {
@@ -597,11 +652,52 @@ export default function ProductOpsStudio() {
                       className="w-full h-64 p-8 rounded-[32px] bg-white border border-slate-200/60 shadow-2xl shadow-slate-200/50 focus:outline-none focus:ring-4 focus:ring-cyan-500/5 transition-all text-sm leading-relaxed resize-none whitespace-pre-wrap break-words"
                     />
 
+                    {pdfUrl && (
+                      <div className="mt-4 bg-white border border-slate-200/60 rounded-[24px] overflow-hidden shadow-sm">
+                        <div className="flex items-center justify-between px-6 py-4">
+                          <div className="flex flex-col">
+                            <div className="text-slate-900 font-bold">PDF preview</div>
+                            {pickedFile ? (
+                              <div className="text-xs text-slate-400 mt-1">
+                                {pickedFile.name}
+                                {pickedFile.size ? ` • ${formatKb(pickedFile.size)}` : ""}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={clearPickedFile}
+                              className="text-xs font-bold text-slate-400 hover:text-slate-900 transition"
+                              title="Remove selected PDF"
+                            >
+                              Clear
+                            </button>
+                            <a
+                              href={pdfUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs font-bold text-cyan-700 hover:text-cyan-900 transition"
+                            >
+                              Open
+                            </a>
+                          </div>
+                        </div>
+                        <div className="h-[520px] bg-slate-50">
+                          <iframe
+                            title="PDF Preview"
+                            src={pdfUrl}
+                            className="w-full h-full"
+                          />
+                        </div>
+                      </div>
+                    )}
+
                     {/* hidden file input */}
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".txt,.md,.csv,.json,text/plain,text/markdown,application/json,text/csv"
+                      accept=".txt,.md,.csv,.json,.pdf,text/plain,text/markdown,application/json,text/csv,application/pdf"
                       className="hidden"
                       onChange={onPickFile}
                     />
