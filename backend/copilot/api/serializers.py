@@ -25,7 +25,7 @@ class UploadTextSerializer(serializers.Serializer):
 class AskSerializer(serializers.Serializer):
     question = serializers.CharField(required=True)
     mode = serializers.ChoiceField(choices=["answer", "document", "automation"], default="answer")
-    answer_mode = serializers.ChoiceField(choices=["sources_only","deterministic","langchain_rag","answer","llm"], required=False, default="sources_only")
+    answer_mode = serializers.ChoiceField(choices=["sources_only","deterministic","langchain_rag","answer","llm"], required=False, default="answer")
     retriever = serializers.ChoiceField(choices=["auto","vector","keyword","hybrid"], default="auto", required=False)
     top_k = serializers.IntegerField(required=False, default=5, min_value=1, max_value=50)
     document_id = serializers.IntegerField(required=False, allow_null=True)

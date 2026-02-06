@@ -8,9 +8,42 @@ STOPWORDS = {
     "this","that","it","as","at","by","from","be"
 }
 
+_WORD_BOUNDARY = r"(?<![0-9A-Za-zА-Яа-яЁё_])"
+_WORD_BOUNDARY_END = r"(?![0-9A-Za-zА-Яа-яЁё_])"
+
+
+def _word_boundary_regex(term: str) -> str:
+    """Safe whole-word regex for Cyrillic/Latin/digits/underscore."""
+    return _WORD_BOUNDARY + re.escape(term) + _WORD_BOUNDARY_END
+
+
 def tokenize(query: str) -> List[str]:
-    words = re.findall(r"[a-zA-Z0-9]+", (query or "").lower())
-    words = [w for w in words if len(w) >= 3 and w not in STOPWORDS]
+    # Support Cyrillic + Latin + digits (Russian queries must work)
+    words = re.findall(r"[0-9A-Za-zА-Яа-яЁё]+", (query or "").lower())
+    # Minimal RU stopwords (small, safe set)
+    ru_stop = {
+        "и","а","но","или","что","это","как","к","ко","в","во","на","по","о","об","обо","от","до",
+        "для","с","со","у","из","за","над","под","при","без","же","ли","то","не","ни","бы","мы","вы","я","он","она","они",
+        "про","чем","эта","этот","эти","книга","книге","книгу","книги"
+        ,
+        # question words / fillers (RU) — they create false matches in keyword retrieval
+        "кто","где","когда","почему","зачем","какой","какая","какое","какие",
+        "какого","какой","какому","каким","какими","каком",
+        "какую","какие","каких",
+        "каков","какова","каково",
+        "сколько","насколько",
+        "какая-то","какой-то","какие-то",
+        "какую-то","каких-то",
+        "либо","или же",
+        # meta words часто встречаются в вопросах и не помогают найти факты в тексте
+        "автор","автора","авторы","автору","автором","авторе",
+        "сказать","говорит","говорят","сказал","сказала",
+        "пишет","написал","написала","упоминает","упомянул","упомянула",
+        "фраза","фразу","фразы","цитата","цитату","цитаты",
+        "имеет","значит"
+    }
+    stop = STOPWORDS | ru_stop
+    words = [w for w in words if len(w) >= 3 and w not in stop]
     # dedupe preserving order
     seen = set()
     out = []
@@ -33,13 +66,14 @@ def keyword_retrieve(workspace_id: int, query: str, top_k: int = 5, document_id:
 
     terms = tokenize(q_raw)
     if not terms:
-        # fallback: try raw query as-is
-        terms = [q_raw.lower()]
+        # If we cannot extract terms, do NOT return random chunks.
+        return []
 
-    # OR filter for any term
+    # OR filter for any term (whole-word match)
     q_obj = Q()
     for t in terms:
-        q_obj |= Q(text__icontains=t) | Q(document__title__icontains=t)
+        pat = _word_boundary_regex(t)
+        q_obj |= Q(text__iregex=pat) | Q(document__title__iregex=pat)
 
     candidates = (
         EmbeddingChunk.objects
@@ -82,14 +116,20 @@ def keyword_retrieve(workspace_id: int, query: str, top_k: int = 5, document_id:
 
     results: List[Dict[str, Any]] = []
     for ch in candidates:
-        text_l = ch.text.lower()
-        title_l = ch.document.title.lower()
+        text_raw = ch.text or ""
+        title_raw = ch.document.title or ""
 
-        matched = [t for t in terms if (t in text_l) or (t in title_l)]
+        matched = []
         score = 0
-        for t in matched:
-            score += text_l.count(t) * 2
-            score += title_l.count(t) * 4
+        for t in terms:
+            pat = _word_boundary_regex(t)
+            flags = re.IGNORECASE
+            in_text = re.findall(pat, text_raw, flags)
+            in_title = re.findall(pat, title_raw, flags)
+            if in_text or in_title:
+                matched.append(t)
+                score += len(in_text) * 2
+                score += len(in_title) * 4
 
         results.append({
             "document_id": ch.document_id,
