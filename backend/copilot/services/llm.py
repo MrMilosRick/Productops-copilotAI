@@ -19,12 +19,12 @@ def _openai_available() -> bool:
 def _strip_noise_sections(text: str) -> str:
     """
     Remove noise headings and everything after them.
-    Strips: Детали:, Примечания:, Дополнительно: (and any content after).
+    Strips: Примечания:, Дополнительно: (and any content after).
     """
     if not text:
         return ""
     noise = re.compile(
-        r"(?m)^\s*(Детали:|Примечания:|Дополнительно:)\s*$",
+        r"(?m)^\s*(Примечания:|Дополнительно:)\s*$",
         re.IGNORECASE,
     )
     m = noise.search(text)
