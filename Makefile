@@ -41,7 +41,7 @@ lint:
 
 ci-smoke:
 	@set -e; \
-	trap 'echo "cleanup: docker compose down"; $(COMPOSE) down -v' EXIT; \
+	trap 'echo "cleanup: docker compose down"; $(COMPOSE) down -v || true' EXIT; \
 	$(COMPOSE) up -d --build; \
 	$(MAKE) health; \
 	$(MAKE) smoke; \
