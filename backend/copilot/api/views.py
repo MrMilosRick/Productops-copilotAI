@@ -35,20 +35,86 @@ def deterministic_synthesis(question: str, retrieved: list[dict]) -> str:
     if not retrieved:
         return "No sources found."
 
-    # Keep a few top sources; prefer already-sorted by final_score
     top = retrieved[:5]
-
     parts = []
     for i, r in enumerate(top, start=1):
-        snippet = (r.get("snippet") or "").strip()
+        snippet = (r.get("snippet") or r.get("text") or "").strip()
         if snippet:
             parts.append(f"{snippet} [{i}]")
 
     if not parts:
         return "No useful snippets found in sources."
 
-    # Simple answer: return stitched evidence.
-    # (Keeps behavior deterministic + debuggable)
+    q_lower = (question or "").strip().lower()
+    is_howto = (
+        q_lower.startswith("как ") or q_lower.startswith("каким образом ")
+        or "шаг" in q_lower or "инструкц" in q_lower
+    )
+    if is_howto:
+        snips: list[tuple[int, str]] = []
+        for idx, r in enumerate(top, start=1):
+            s = (r.get("snippet") or r.get("text") or "").strip()
+            if s:
+                snips.append((idx, s))
+        if not snips:
+            return " ".join(parts)
+        first = snips[0][1]
+        dot = first.find(". ", 10)
+        if dot > 0:
+            answer_sent = first[: dot + 1].strip()
+        else:
+            words = first.split()
+            answer_sent = " ".join(words[:25]) + ("..." if len(words) > 25 else "")
+        detail_bullets = []
+        for src_i, s in snips[:5]:
+            step = (s[:80] + "..." if len(s) > 80 else s).strip()
+            if step:
+                detail_bullets.append(f"- {step} [{src_i}]")
+        if len(detail_bullets) > 4:
+            detail_bullets = detail_bullets[:4]
+        source_bullets = []
+        for src_i, s in snips[:3]:
+            short = " ".join(s.split()[:25])
+            if len(s.split()) > 25:
+                short += "..."
+            if short:
+                source_bullets.append(f"- {short} [{src_i}]")
+        lines = [
+            f"Ответ: {answer_sent}",
+            "",
+            "Детали:",
+            *detail_bullets,
+            "",
+            "Источники:",
+            *source_bullets,
+        ]
+        non_empty = [ln for ln in lines if ln.strip()]
+        while len(non_empty) > 14 and detail_bullets:
+            detail_bullets.pop()
+            lines = [
+                f"Ответ: {answer_sent}",
+                "",
+                "Детали:",
+                *detail_bullets,
+                "",
+                "Источники:",
+                *source_bullets,
+            ]
+            non_empty = [ln for ln in lines if ln.strip()]
+        if len(non_empty) > 14 and source_bullets:
+            source_bullets.pop()
+            lines = [
+                f"Ответ: {answer_sent}",
+                "",
+                "Детали:",
+                *detail_bullets,
+                "",
+                "Источники:",
+                *source_bullets,
+            ]
+            non_empty = [ln for ln in lines if ln.strip()]
+        return "\n".join(lines)
+
     return " ".join(parts)
 
 def request_hash(payload: dict) -> str:
@@ -314,9 +380,9 @@ def _validate_and_repair_fallback(question: str, draft: str) -> str:
     d = (draft or "").strip()
     if not d:
         return draft
-    expected_first = "В данном документе нет информации, чтобы ответить на: " + q + "."
+    expected_legacy = "В данном документе нет информации, чтобы ответить на: " + q + "."
     first_line = (d.split("\n")[0] or "").strip()
-    if first_line != expected_first:
+    if first_line != expected_legacy and not first_line.startswith("В этом документе нет информации о том,"):
         out = repair_fallback_openai(question, draft)
         return (out.get("answer") or "").strip() or draft
     if "В данном документе нет прямого ответа" in d:
