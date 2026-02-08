@@ -67,11 +67,22 @@ def deterministic_synthesis(question: str, retrieved: list[dict]) -> str:
             answer_sent = " ".join(words[:25]) + ("..." if len(words) > 25 else "")
         detail_bullets = []
         for src_i, s in snips[:5]:
+            if ":" in s:
+                colon_pos = s.find(":")
+                after = s[colon_pos + 1 :].strip()
+                items = [x.strip() for x in after.split(",") if x.strip()]
+                if len(items) >= 2:
+                    take = min(5, len(items))
+                    for item in items[:take]:
+                        item = (item or "").rstrip(" .;")
+                        if item:
+                            detail_bullets.append(f"- {item} [{src_i}]")
+                    continue
             step = (s[:80] + "..." if len(s) > 80 else s).strip()
             if step:
                 detail_bullets.append(f"- {step} [{src_i}]")
-        if len(detail_bullets) > 4:
-            detail_bullets = detail_bullets[:4]
+        if len(detail_bullets) > 5:
+            detail_bullets = detail_bullets[:5]
         source_bullets = []
         for src_i, s in snips[:3]:
             short = " ".join(s.split()[:25])
