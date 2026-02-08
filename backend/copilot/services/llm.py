@@ -217,25 +217,33 @@ def general_answer_openai(question: str) -> Dict[str, Any]:
     """
     if not _openai_available():
         q = (question or "").strip() or "заданный вопрос"
-        return {
-            "answer": (
-                f"Проверка по документу: В документе нет информации для ответа на: {q}.\n\n"
-                "Что именно отсутствует:\n- В документе нет достаточных фрагментов по запросу.\n\n"
-                "Общий ответ (не из документа):\n"
-                "- Уточните формулировку или загрузите документ с нужной темой.\n"
-                "- Можно переформулировать вопрос.\n\n"
-                "Как получить точный ответ по документу:\n"
-                "- Найдите в документе фрагмент с упоминанием темы.\n"
-                "- Задайте вопрос по конкретному месту в документе."
-            ),
-            "llm_used": "none",
-        }
+        q_lower = q.lower()
+        is_howto = q_lower.startswith("как ") or q_lower.startswith("каким образом ")
+        first = f"В данном документе нет информации, чтобы ответить на: {q}."
+        check = "Проверка по документу: В документе нет сведений по теме вопроса."
+        absent = "Что именно отсутствует:\n- Нет релевантных фрагментов в документе."
+        if is_howto:
+            general_bullets = [
+                "Соберите исходные данные и инструменты, которые влияют на результат.",
+                "Сделайте базовый вариант по шагам (подготовка → действие → фиксация).",
+                "Проверьте типичные ошибки и ограничения, доведите до нужного качества.",
+            ]
+            how_to_get = "Как получить точный ответ по документу:\n- Загрузите документ с инструкциями по теме или задайте вопрос по конкретному месту в документе."
+        else:
+            general_bullets = [
+                "Ответ зависит от контекста и целей.",
+                "Рекомендуется уточнить критерии или обратиться к тематическому источнику.",
+            ]
+            how_to_get = "Как получить точный ответ по документу:\n- Загрузите документ с нужной темой.\n- Задайте вопрос по конкретному месту в документе."
+        general = "Общий ответ (не из документа):\nЭто общий ответ, не из документа.\n" + "\n".join("- " + b for b in general_bullets)
+        answer_text = f"{first}\n\n{check}\n\n{absent}\n\n{general}\n\n{how_to_get}"
+        return {"answer": answer_text, "llm_used": "none"}
     model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
     effort = os.getenv("OPENAI_REASONING_EFFORT", "low")
     max_out = _env_int("OPENAI_MAX_OUTPUT_TOKENS", 300)
     system = (
         "You are a fallback assistant when the document has no direct answer. Output in Russian, 10–14 lines max. "
-        "The very first line MUST be exactly: 'В данном документе нет информации, чтобы ответить на: <question>.' Do NOT add any other notice or similar sentence. "
+        "The very first line MUST be exactly: 'В этом документе нет информации о том, <question>.' (replace <question> with the user question). Do NOT add any other notice or similar sentence. "
         "Then: (1) 'Почему нельзя точно:' — 1–2 bullets, no questions to the user. "
         "(2) 'Общий ответ вне документа:' — 3–5 bullets, concise, no mega-guides, no generic filler. "
         "(3) 'Чтобы ответить по документу:' — 2–3 concrete bullets (name/character/page/quote). "
@@ -267,10 +275,11 @@ def repair_fallback_openai(question: str, draft: str) -> Dict[str, Any]:
         q = (question or "").strip() or "заданный вопрос"
         return {
             "answer": (
-                f"Проверка по документу: В документе нет информации для ответа на: {q}.\n\n"
-                "Что именно отсутствует:\n- В документе нет достаточных фрагментов по запросу.\n\n"
-                "Общий ответ (не из документа):\n- Уточните формулировку или загрузите документ с нужной темой.\n\n"
-                "Как получить точный ответ по документу:\n- Задайте вопрос по конкретному месту в документе."
+                f"В этом документе нет информации о том, {q}.\n\n"
+                "- Ответ зависит от контекста и целей.\n"
+                "- Рекомендуется уточнить критерии и ограничения.\n"
+                "- Полезно рассмотреть несколько вариантов и сравнить.\n\n"
+                "Можете задать другой вопрос по теме документа."
             ),
             "llm_used": "none",
         }
@@ -279,7 +288,7 @@ def repair_fallback_openai(question: str, draft: str) -> Dict[str, Any]:
     max_out = _env_int("OPENAI_MAX_OUTPUT_TOKENS", 300)
     system = (
         "Rewrite the draft into a strict Russian fallback answer. 10–14 lines max. "
-        "First line EXACT: 'В данном документе нет информации, чтобы ответить на: <question>.' (replace <question> with the user question). "
+        "First line EXACT: 'В этом документе нет информации о том, <question>.' (replace <question> with the user question). "
         "Sections in order: 'Почему нельзя точно:' (1–2 bullets); 'Общий ответ вне документа:' (3–5 bullets, concise); 'Чтобы ответить по документу:' (2–3 concrete bullets). "
         "Must NOT include 'В данном документе нет прямого ответа'. Must NOT use: возможно, может быть, возможен, иногда. "
         "If question contains 'главн' and ('героин' or 'герой' or 'персонаж'), general bullets = motivation/conflict/arc/choices only; MUST NOT mention medical/diagnosis/addiction."
