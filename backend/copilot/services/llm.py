@@ -261,6 +261,19 @@ def repair_fallback_openai(question: str, draft: str) -> Dict[str, Any]:
     Rewrite draft into strict Russian fallback template. Same env vars as general_answer_openai.
     Returns dict: { "answer": str, "llm_used": str }
     """
+    if not _openai_available():
+        if (draft or "").strip():
+            return {"answer": (draft or "").strip(), "llm_used": "none"}
+        q = (question or "").strip() or "заданный вопрос"
+        return {
+            "answer": (
+                f"Проверка по документу: В документе нет информации для ответа на: {q}.\n\n"
+                "Что именно отсутствует:\n- В документе нет достаточных фрагментов по запросу.\n\n"
+                "Общий ответ (не из документа):\n- Уточните формулировку или загрузите документ с нужной темой.\n\n"
+                "Как получить точный ответ по документу:\n- Задайте вопрос по конкретному месту в документе."
+            ),
+            "llm_used": "none",
+        }
     model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
     effort = os.getenv("OPENAI_REASONING_EFFORT", "low")
     max_out = _env_int("OPENAI_MAX_OUTPUT_TOKENS", 300)
@@ -290,6 +303,18 @@ def repair_doc_answer_openai(question: str, context: str, draft: str) -> Dict[st
     Rewrite draft into strict Russian doc-answer format. Preserve citation indices [1].. from context blocks.
     Returns dict: { "answer": str, "llm_used": str }
     """
+    if not _openai_available():
+        if (draft or "").strip():
+            return {"answer": (draft or "").strip(), "llm_used": "none"}
+        parts = ["Ответ: В документе нет прямого ответа на этот вопрос.", ""]
+        parts.append("Источники:")
+        for i, block in enumerate((context or "").split("\n\n")[:3], start=1):
+            line = block.strip().split("\n", 1)[-1].strip()[:200] if block.strip() else ""
+            if line:
+                parts.append(f"- {line} [{i}]")
+        if len(parts) == 3:
+            parts.append("(нет фрагментов)")
+        return {"answer": "\n".join(parts), "llm_used": "none"}
     model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
     effort = os.getenv("OPENAI_REASONING_EFFORT", "low")
     max_out = _env_int("OPENAI_MAX_OUTPUT_TOKENS", 300)
