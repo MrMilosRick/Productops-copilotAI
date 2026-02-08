@@ -1,4 +1,4 @@
-.PHONY: up down logs health smoke lint ci-smoke dev-smoke ui-dev ui-build ui-sync
+.PHONY: up down logs health smoke qa-mvp lint ci-smoke dev-smoke ui-dev ui-build ui-sync
 
 COMPOSE = docker compose -f infra/docker-compose.yml
 BASE_URL ?= http://localhost:8001
@@ -29,6 +29,9 @@ health:
 smoke:
 	@python3 tests/smoke_test.py
 
+qa-mvp:
+	@BASE_URL="$(BASE_URL)" python3 tests/qa_mvp_v1.py
+
 lint:
 	@python3 -m py_compile backend/app/urls.py
 	@python3 -m py_compile backend/copilot/api/views.py
@@ -41,7 +44,8 @@ ci-smoke:
 	trap 'echo "cleanup: docker compose down"; $(COMPOSE) down -v' EXIT; \
 	$(COMPOSE) up -d --build; \
 	$(MAKE) health; \
-	$(MAKE) smoke
+	$(MAKE) smoke; \
+	$(MAKE) qa-mvp
 
 dev-smoke:
 	@set -e; \

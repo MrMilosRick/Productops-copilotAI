@@ -7,7 +7,7 @@ from copilot.services.embeddings import embed_texts
 from copilot.services.vector_retriever import vector_retrieve
 from copilot.services.retriever import keyword_retrieve
 
-_WORD_RE = re.compile(r"[A-Za-z0-9_]{2,}")
+_WORD_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё_]{2,}")
 
 
 def _query_terms(question: str) -> List[str]:
