@@ -429,6 +429,82 @@ def _build_doc_context(retrieved: list) -> str:
     return "\n\n".join(ctx_lines).strip()
 
 
+def ensure_doc_sections(answer_text: str, retrieved: list) -> str:
+    """If answer has Ответ/Детали/Источники return as-is; else build structured text from retrieved."""
+    if not (answer_text or "").strip() or not retrieved:
+        return answer_text or ""
+    t = (answer_text or "").strip()
+    if "Ответ:" in t and "Детали:" in t and "Источники:" in t:
+        return answer_text
+    top = (retrieved or [])[:5]
+    snips = []
+    for idx, r in enumerate(top, start=1):
+        s = (r.get("snippet") or r.get("text") or "").strip()
+        if s:
+            snips.append((idx, s))
+    if not snips:
+        return answer_text or ""
+    first = snips[0][1]
+    dot = first.find(". ", 10)
+    if dot > 0:
+        answer_sent = first[: dot + 1].strip()
+    else:
+        words = first.split()
+        answer_sent = " ".join(words[:25]) + ("..." if len(words) > 25 else "")
+    detail_bullets = []
+    for src_i, s in snips[:5]:
+        if ":" in s:
+            colon_pos = s.find(":")
+            after = s[colon_pos + 1 :].strip()
+            items = [x.strip() for x in after.split(",") if x.strip()]
+            if len(items) >= 2:
+                take = min(5, len(items))
+                for item in items[:take]:
+                    item = (item or "").rstrip(" .;")
+                    if item:
+                        detail_bullets.append(f"- {item} [{src_i}]")
+                continue
+        step = (s[:80] + "..." if len(s) > 80 else s).strip()
+        if step:
+            detail_bullets.append(f"- {step} [{src_i}]")
+    if len(detail_bullets) > 5:
+        detail_bullets = detail_bullets[:5]
+    source_bullets = []
+    for src_i, s in snips[:3]:
+        short = " ".join(s.split()[:25])
+        if len(s.split()) > 25:
+            short += "..."
+        if short:
+            source_bullets.append(f"- {short} [{src_i}]")
+    lines = [f"Ответ: {answer_sent}", "", "Детали:", *detail_bullets, "", "Источники:", *source_bullets]
+    non_empty = [ln for ln in lines if ln.strip()]
+    while len(non_empty) > 14 and detail_bullets:
+        detail_bullets.pop()
+        lines = [f"Ответ: {answer_sent}", "", "Детали:", *detail_bullets, "", "Источники:", *source_bullets]
+        non_empty = [ln for ln in lines if ln.strip()]
+    if len(non_empty) > 14 and source_bullets:
+        source_bullets.pop()
+        lines = [f"Ответ: {answer_sent}", "", "Детали:", *detail_bullets, "", "Источники:", *source_bullets]
+    return "\n".join(lines)
+
+
+def ensure_general_sections(question: str, answer_text: str) -> str:
+    """If answer has all 4 NO-DOC headings return as-is; else return minimal template."""
+    if not (answer_text or "").strip():
+        return answer_text or ""
+    t = (answer_text or "").strip()
+    required = ("Проверка по документу:", "Что именно отсутствует:", "Общий ответ (не из документа):", "Как получить точный ответ по документу:")
+    if all(h in t for h in required):
+        return answer_text
+    q = (question or "").strip() or "заданный вопрос"
+    return (
+        f"Проверка по документу: В документе нет информации для ответа на: {q}.\n\n"
+        "Что именно отсутствует:\n- Нет релевантных фрагментов в документе.\n\n"
+        "Общий ответ (не из документа):\nЭто общий ответ, не из документа.\n- Ответ зависит от контекста и целей.\n\n"
+        "Как получить точный ответ по документу:\n- Задайте вопрос по конкретному месту в документе."
+    )
+
+
 def _validate_and_repair_doc_answer(question: str, retrieved: list, draft: str) -> tuple:
     """Validate doc answer format; if invalid, call repair_doc_answer_openai. Returns (answer_str, llm_used_if_repaired_or_None)."""
     d = (draft or "").strip()
@@ -834,7 +910,7 @@ def ask(request):
                     pass
                 return Response({
                     "run_id": run.id,
-                    "answer": _strip_noise_sections(_normalize_general_output(run.final_output or "", question or "")),
+                    "answer": _strip_noise_sections(ensure_general_sections(question or "", _normalize_general_output(run.final_output or "", question or ""))),
                     "sources": [],
                     "retriever_used": "general",
                     "llm_used": llm_used,
@@ -904,7 +980,7 @@ def ask(request):
                 pass
             return Response({
                 "run_id": run.id,
-                "answer": _strip_noise_sections(_normalize_general_output(run.final_output or "", question or "")),
+                "answer": _strip_noise_sections(ensure_general_sections(question or "", _normalize_general_output(run.final_output or "", question or ""))),
                 "sources": [],
                 "retriever_used": "general",
                 "llm_used": llm_used,
@@ -935,6 +1011,7 @@ def ask(request):
             run.final_output = out.get("answer", "")
             repaired, repair_llm = _validate_and_repair_doc_answer(question, retrieved, run.final_output)
             run.final_output = repaired
+            run.final_output = ensure_doc_sections(run.final_output, retrieved)
             if repair_llm is not None:
                 llm_used = repair_llm
         else:

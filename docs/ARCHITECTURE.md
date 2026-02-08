@@ -31,6 +31,23 @@ Key Makefile flows:
 - `make ci-smoke` → compose up → health → smoke → compose down -v
 - `make lint` → `py_compile` of key backend files and smoke script
 
+## CI smoke policy (Docker = source of truth)
+CI runs E2E via Docker Compose (`make ci-smoke`). This is the only supported “source of truth” for runtime.
+
+### Deterministic by default
+GitHub Actions forces deterministic smoke:
+- `.github/workflows/ci.yml` sets `SMOKE_LLM=0`
+- CI does NOT provide `OPENAI_API_KEY`
+
+Reason: CI must be reproducible without external credentials/network calls.
+
+### Local / manual LLM smoke
+To run LLM-backed smoke locally (only when you intentionally provide a key):
+```bash
+export OPENAI_API_KEY="..."
+SMOKE_LLM=1 make ci-smoke
+```
+
 ## Runtime entrypoints
 - Django (web): `backend/manage.py` + `backend/app/urls.py`
 - Celery (worker): `backend/app/celery.py` + tasks in `backend/copilot/tasks/`
