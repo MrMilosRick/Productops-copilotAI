@@ -19,6 +19,8 @@ jobs:
           test -f .env || touch .env
 
       - name: Run smoke
+        env:
+          SMOKE_LLM: "0"
         run: |
           make ci-smoke
 
