@@ -12,6 +12,10 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _openai_available() -> bool:
+    return bool(os.getenv("OPENAI_API_KEY", "").strip())
+
+
 def _strip_noise_sections(text: str) -> str:
     """
     Remove noise headings and everything after them.
@@ -128,12 +132,27 @@ def rag_answer_openai(question: str, retrieved: List[Dict[str, Any]]) -> Dict[st
     Returns dict: { "answer": str, "llm_used": str }
     Uses Responses API.
     """
+    retrieved = (retrieved or [])[:5]
+    if not _openai_available():
+        parts = ["Ответ:"]
+        src_lines = []
+        for i, r in enumerate(retrieved[:3], start=1):
+            block = ((r or {}).get("text") or (r or {}).get("snippet") or "").strip()[:300]
+            if block:
+                src_lines.append(f"- {block} [{i}]")
+        if src_lines:
+            parts.append(" По документу (без LLM).")
+            parts.append("")
+            parts.append("Источники:")
+            parts.extend(src_lines)
+            ans = "\n".join(parts)
+        else:
+            ans = "Ответ: В документе нет прямого ответа на этот вопрос.\n\nИсточники:\n(нет фрагментов)"
+        return {"answer": ans, "llm_used": "none"}
     model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
     effort = os.getenv("OPENAI_REASONING_EFFORT", "low")
     max_out = _env_int("OPENAI_MAX_OUTPUT_TOKENS", 300)
 
-    # guardrails
-    retrieved = (retrieved or [])[:5]
     ctx_lines = []
     for i, r in enumerate(retrieved, start=1):
         title = (r or {}).get("document_title", "")
@@ -196,6 +215,21 @@ def general_answer_openai(question: str) -> Dict[str, Any]:
     General answer (no RAG context). Same env vars as rag_answer_openai.
     Returns dict: { "answer": str, "llm_used": str }
     """
+    if not _openai_available():
+        q = (question or "").strip() or "заданный вопрос"
+        return {
+            "answer": (
+                f"Проверка по документу: В документе нет информации для ответа на: {q}.\n\n"
+                "Что именно отсутствует:\n- В документе нет достаточных фрагментов по запросу.\n\n"
+                "Общий ответ (не из документа):\n"
+                "- Уточните формулировку или загрузите документ с нужной темой.\n"
+                "- Можно переформулировать вопрос.\n\n"
+                "Как получить точный ответ по документу:\n"
+                "- Найдите в документе фрагмент с упоминанием темы.\n"
+                "- Задайте вопрос по конкретному месту в документе."
+            ),
+            "llm_used": "none",
+        }
     model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
     effort = os.getenv("OPENAI_REASONING_EFFORT", "low")
     max_out = _env_int("OPENAI_MAX_OUTPUT_TOKENS", 300)
