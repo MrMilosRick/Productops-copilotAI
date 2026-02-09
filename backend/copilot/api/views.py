@@ -429,6 +429,22 @@ def _build_doc_context(retrieved: list) -> str:
     return "\n\n".join(ctx_lines).strip()
 
 
+def _trim_answer_line_citations(text: str) -> str:
+    """In the first line starting with 'Ответ:', keep only the first two citation markers [n]."""
+    if not (text or "").strip():
+        return text or ""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.strip().startswith("Ответ:"):
+            matches = list(re.finditer(r"\[\d+\]", line))
+            if len(matches) >= 3:
+                for m in reversed(matches[2:]):
+                    line = line[: m.start()] + line[m.end() :]
+                lines[i] = line
+            break
+    return "\n".join(lines)
+
+
 def ensure_doc_sections(answer_text: str, retrieved: list) -> str:
     """If answer has Ответ/Детали/Источники return as-is; else build structured text from retrieved."""
     if not (answer_text or "").strip() or not retrieved:
@@ -437,6 +453,8 @@ def ensure_doc_sections(answer_text: str, retrieved: list) -> str:
     if "Ответ:" in t and "Детали:" in t and "Источники:" in t:
         return answer_text
     top = (retrieved or [])[:5]
+    if any(((r or {}).get("snippet") or (r or {}).get("text") or "").strip().startswith("Шаг ") for r in top):
+        top = sorted(top, key=lambda r: int(r.get("chunk_index", 0)) if isinstance(r.get("chunk_index"), (int, float)) else 0)
     snips = []
     for idx, r in enumerate(top, start=1):
         s = (r.get("snippet") or r.get("text") or "").strip()
@@ -814,6 +832,26 @@ def ask(request):
             retrieved = hybrid_retrieve(ws.id, question, top_k=top_k, document_id=document_id)
             retriever_used = "hybrid"
 
+        if document_id is not None and not retrieved:
+            chunks_qs = EmbeddingChunk.objects.filter(document_id=document_id).select_related("document").order_by("chunk_index")[:top_k]
+            chunks = list(chunks_qs)
+            retrieved = []
+            for ch in chunks:
+                txt = (ch.text or "").strip()
+                if not txt:
+                    continue
+                retrieved.append({
+                    "document_id": ch.document_id,
+                    "document_title": getattr(ch.document, "title", "") if getattr(ch, "document", None) else "",
+                    "chunk_id": ch.id,
+                    "chunk_index": getattr(ch, "chunk_index", 0),
+                    "snippet": txt[:300] if len(txt) > 300 else txt,
+                    "text": txt,
+                    "retriever_hint": "doc_fallback",
+                })
+            if retrieved:
+                retriever_used = "doc_fallback"
+
         V_THR = 0.55
         V_HARD = 0.70
         KW_THR = 4
@@ -830,6 +868,12 @@ def ask(request):
         # "велосипед" had max_score≈0.52, so 0.55 still routes to general.
         if max_score < 0.55:
             relevant = False
+        # IMPORTANT: document_id does NOT automatically grant doc_rag.
+        # Invariant (CI smoke is source of truth):
+        # - document_id must NOT enable doc_rag on vector-only similarity
+        # - doc_rag for document-scoped queries requires keyword evidence (has_kw_hit)
+        if document_id is not None and retrieved and has_kw_hit:
+            relevant = True
         debug_payload = {
             "best_kw": best_kw,
             "best_vec": best_vec,
@@ -843,8 +887,6 @@ def ask(request):
             "document_id": document_id,
             "top_k": top_k,
         }
-        if document_id is not None and retrieved and has_kw_hit:
-            relevant = True
 
         if answer_mode == "sources_only":
             AgentStep.objects.create(
@@ -1047,7 +1089,7 @@ def ask(request):
             pass
 
         return Response(
-            {"run_id": run.id, "answer": _strip_noise_sections(run.final_output or ""), "sources": sanitize_sources(retrieved), "retriever_used": retriever_used, "llm_used": llm_used, "answer_mode": answer_mode, "route": "doc_rag", "notice": "", "debug": debug_payload}
+            {"run_id": run.id, "answer": _trim_answer_line_citations(_strip_noise_sections(run.final_output or "")), "sources": sanitize_sources(retrieved), "retriever_used": retriever_used, "llm_used": llm_used, "answer_mode": answer_mode, "route": "doc_rag", "notice": "", "debug": debug_payload}
         )
 
     except Exception as e:
