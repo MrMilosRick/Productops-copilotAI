@@ -14,6 +14,13 @@ API_ASK = f"{BASE_URL}/api/ask/"
 
 OUT_PATH = "/tmp/qa_mvp_v1.jsonl"
 
+LEGACY_NO_DOC_HEADINGS = (
+    "Проверка по документу:",
+    "Что именно отсутствует:",
+    "Общий ответ (не из документа):",
+    "Как получить точный ответ по документу:",
+)
+
 
 def _curl_json(url: str, method: str = "GET", headers: Dict[str, str] | None = None, data: Dict[str, Any] | None = None) -> Dict[str, Any]:
     headers = headers or {}
@@ -146,6 +153,10 @@ def main() -> int:
         retr = resp.get("retriever_used")
         run_id = resp.get("run_id")
         answer = resp.get("answer") or ""
+        has_disclaimer = "В этом документе нет информации" in answer
+        has_hint = "Если вам нужен ответ именно по документу" in answer
+        has_legacy = any(h in answer for h in LEGACY_NO_DOC_HEADINGS)
+        new_general_contract = has_disclaimer and has_hint and not has_legacy
 
         # expectations
         if kind == "DOC":
@@ -155,13 +166,13 @@ def main() -> int:
             if route == "doc_rag":
                 good = (sources_n > 0)
             elif route == "general":
-                good = (sources_n == 0 and ("Проверка по документу:" in answer))
+                good = (sources_n == 0 and new_general_contract)
             else:
                 good = False
         elif kind == "SUM":
             good = (route == "summary") and (sources_n > 0)
         else:
-            good = (route == "general") and (sources_n == 0)
+            good = (route == "general") and (sources_n == 0) and new_general_contract
 
         ok += int(good)
         rows.append(

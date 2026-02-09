@@ -507,20 +507,46 @@ def ensure_doc_sections(answer_text: str, retrieved: list) -> str:
 
 
 def ensure_general_sections(question: str, answer_text: str) -> str:
-    """If answer has all 4 NO-DOC headings return as-is; else return minimal template."""
+    """Ensure NO-DOC (route=general) output follows the UX contract:
+    1) one honest line that doc has no answer
+    2) a helpful general answer (not from document)
+    3) one gentle hint how to get a doc-grounded answer
+    """
     if not (answer_text or "").strip():
         return answer_text or ""
+
     t = (answer_text or "").strip()
-    required = ("Проверка по документу:", "Что именно отсутствует:", "Общий ответ (не из документа):", "Как получить точный ответ по документу:")
-    if all(h in t for h in required):
-        return answer_text
-    q = (question or "").strip() or "заданный вопрос"
-    return (
-        f"Проверка по документу: В документе нет информации для ответа на: {q}.\n\n"
-        "Что именно отсутствует:\n- Нет релевантных фрагментов в документе.\n\n"
-        "Общий ответ (не из документа):\nЭто общий ответ, не из документа.\n- Ответ зависит от контекста и целей.\n\n"
-        "Как получить точный ответ по документу:\n- Задайте вопрос по конкретному месту в документе."
+
+    # If it already looks like the desired 3-part structure, keep as-is.
+    if t.startswith("В этом документе нет информации") and "\n\n" in t and "Если вам нужен ответ" in t:
+        return t
+
+    # Remove legacy NO-DOC template headings / boilerplate if present.
+    drop_prefixes = (
+        "Проверка по документу:",
+        "Что именно отсутствует:",
+        "Общий ответ (не из документа):",
+        "Как получить точный ответ по документу:",
     )
+    kept_lines = []
+    for line in t.splitlines():
+        l = (line or "").strip()
+        if not l:
+            continue
+        if any(l.startswith(p) for p in drop_prefixes):
+            continue
+        # drop legacy bullet-style "missing fragments" noise
+        if l.startswith("- Нет релевантных фрагментов"):
+            continue
+        if l.startswith("Это общий ответ, не из документа"):
+            continue
+        kept_lines.append(l)
+
+    general = "\n".join(kept_lines).strip() or t
+
+    honest = "В этом документе нет информации, чтобы ответить на ваш вопрос."
+    hint = "Если вам нужен ответ именно по документу, задайте вопрос о конкретном фрагменте или загрузите текст, где эта тема упоминается."
+    return f"{honest}\n\n{general}\n\n{hint}"
 
 
 def _validate_and_repair_doc_answer(question: str, retrieved: list, draft: str) -> tuple:
