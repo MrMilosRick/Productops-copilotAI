@@ -163,10 +163,10 @@ def main() -> int:
         retr = resp.get("retriever_used")
         run_id = resp.get("run_id")
         answer = resp.get("answer") or ""
-        has_disclaimer = "В этом документе нет информации" in answer
-        has_hint = "Если вам нужен ответ именно по документу" in answer
         has_legacy = any(h in answer for h in LEGACY_NO_DOC_HEADINGS)
-        new_general_contract = has_disclaimer and has_hint and not has_legacy
+        # MVP UX: general answers should be clean, without legacy headings.
+        # We no longer require disclaimer/hint text for general answers.
+        general_contract_ok = (not has_legacy)
 
         # expectations
         if kind in ("DOC", "DOC_INTRO"):
@@ -176,13 +176,13 @@ def main() -> int:
             if route == "doc_rag":
                 good = (sources_n > 0)
             elif route == "general":
-                good = (sources_n == 0 and new_general_contract)
+                good = (sources_n == 0 and general_contract_ok)
             else:
                 good = False
         elif kind == "SUM":
             good = (route == "summary") and (sources_n > 0)
         else:
-            good = (route == "general") and (sources_n == 0) and new_general_contract
+            good = (route == "general") and (sources_n == 0) and general_contract_ok
 
         ok += int(good)
         rows.append(
