@@ -121,6 +121,13 @@ def main() -> int:
     doc_id = upload_text("QA_MVP_DOC", seed_text)
     _ = wait_embedded(doc_id, timeout_s=120)
 
+    intro_text = (
+        "Меня зовут Арина. Немного фактов обо мне: я веду команду продуктовых аналитиков, люблю документировать процессы "
+        "и рассказывать о подходах к работе. О себе я говорю честно и перечисляю сильные стороны."
+    )
+    intro_doc_id = upload_text("QA_MVP_INTRO", intro_text)
+    _ = wait_embedded(intro_doc_id, timeout_s=120)
+
     tests: List[Tuple[str, str]] = [
         # DOC (expect doc_rag + sources>0)
         ("DOC", "приведи точную цитату про «героиня хочет изменить жизнь»"),
@@ -129,6 +136,7 @@ def main() -> int:
         ("DOC", "где в тексте упоминается свобода?"),
         ("DOC", "какие главы есть в документе?"),
         ("DOC", "приведи точную цитату: «она принимает решение»"),
+        ("DOC_INTRO", "Что автор говорит о себе?"),
         # SUMMARY (expect route summary + sources>0)
         ("SUM", "о чем книга?"),
         # NO-DOC (expect general + sources==0)
@@ -145,6 +153,8 @@ def main() -> int:
     for kind, q in tests:
         if kind in ("DOC", "SUM"):
             resp = ask(q, document_id=doc_id, answer_mode="deterministic")
+        elif kind == "DOC_INTRO":
+            resp = ask(q, document_id=intro_doc_id, answer_mode="deterministic")
         else:
             resp = ask(q, document_id=None, answer_mode="deterministic")
 
@@ -159,7 +169,7 @@ def main() -> int:
         new_general_contract = has_disclaimer and has_hint and not has_legacy
 
         # expectations
-        if kind == "DOC":
+        if kind in ("DOC", "DOC_INTRO"):
             # DOC tests: two valid outcomes:
             # 1) doc_rag with sources (grounded in document)
             # 2) general with zero sources ONLY if answer explicitly says "not in document"
