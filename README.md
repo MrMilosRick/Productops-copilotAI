@@ -3,8 +3,8 @@
 ProductOps Copilot — сервис "спроси свои документы", который дает **проверяемые ответы с источниками (sources)** для продактов и инженеров.
 
 **Два режима (MVP):**
-- **DOC mode**: ответ по загруженному документу → `route=doc_rag`, `sources[] != []`
-- **NO-DOC mode**: если в документах нет опоры → честно "нет в документе" → `route=general`, `sources=[]`
+- **DOC mode**: ответ по выбранному документу → `route=doc_rag`, `sources[] != []`
+- **NO-DOC mode**: если документ не выбран или в документе нет опоры → общий ответ → `route=general`, `sources=[]`
 
 ✅ MVP зафиксирован тегом: **`v1.0-mvp`**  
 ✅ Источник истины по запуску: **Docker Compose** (`infra/docker-compose.yml`)
@@ -36,19 +36,20 @@ curl -sS -X POST "http://127.0.0.1:8001/api/ask/" \
 
 ---
 
-## Proof: anti-hallucination QA (12/12)
-В репозитории используется QA-скрипт, который проверяет два режима:
-- 6 вопросов **DOC** → ожидаем `route=doc_rag` и `sources_n>0`
-- 6 вопросов **NO-DOC** → ожидаем `route=general` и `sources_n==0`
+## Proof: anti-hallucination QA (14/14)
+В репозитории используется QA-скрипт, который проверяет два режима (и summary):
+- **DOC**: вопросы по документу → ожидаем `route=doc_rag` и `sources_n>0`
+- **SUMMARY**: краткое резюме → ожидаем `route=summary` и `sources_n>0`
+- **NO-DOC**: вопросы без документа → ожидаем `route=general` и `sources_n==0`
 
 Запуск:
 ```bash
-python3 /tmp/qa_mvp_v1.py
+python3 tests/qa_mvp_v1.py
 ```
 
 Ожидаемый результат:
 ```text
-PASS 12 / 12
+PASS 14 / 14
 ```
 
 Файл с результатами:
@@ -65,16 +66,18 @@ tail -n 12 /tmp/qa_mvp_v1.jsonl
 curl -sS -X POST "http://127.0.0.1:8001/api/ask/" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: smoke-doc-v1" \
-  -d '{"question":"что автор говорит про пассивный доход?"}' \
+  -d '{"question":"в чем смысл документа?","document_id":1,"retriever":"auto","answer_mode":"deterministic"}' \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); print("route",d.get("route"),"sources",len(d.get("sources") or []),"run",d.get("run_id"))'
 ```
+
+> Примечание: document_id — это ID документа, который вы загрузили через API /api/kb/upload_text/.
 
 ### NO-DOC mode (route=general, sources=[])
 ```bash
 curl -sS -X POST "http://127.0.0.1:8001/api/ask/" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: smoke-nodoc-v1" \
-  -d '{"question":"как выбрать велосипед?"}' \
+  -d '{"question":"как выбрать велосипед?","retriever":"auto","answer_mode":"deterministic"}' \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); print("route",d.get("route"),"sources",len(d.get("sources") or []),"run",d.get("run_id"))'
 ```
 
@@ -103,7 +106,7 @@ curl -sS "http://127.0.0.1:8001/api/runs/${RID}/steps/" | head -c 2000; echo
 - DOC/NO-DOC gating без галлюцинаций (через `route` + `sources`)
 - стабильный ask-контракт (answer/sources/run_id/route)
 - Docker Compose запуск
-- QA 12/12 как доказательство поведения
+- QA 14/14 как доказательство поведения
 
 **OUT:**
 - follow-up диалоги (v1.1)
