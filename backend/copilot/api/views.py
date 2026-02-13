@@ -1,5 +1,8 @@
 import hashlib
 import re
+import uuid
+from typing import Optional
+
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -20,12 +23,105 @@ from copilot.services.embeddings import embed_texts
 from copilot.services.vector_retriever import vector_retrieve
 from copilot.services.hybrid_retriever import hybrid_retrieve
 from copilot.services.idempotency import normalize_idempotency_key
-from copilot.services.llm import rag_answer_openai, general_answer_openai, repair_fallback_openai, repair_doc_answer_openai, _strip_noise_sections, _normalize_general_output
-import uuid
+from copilot.services.llm import (
+    rag_answer_openai,
+    general_answer_openai,
+    repair_fallback_openai,
+    repair_doc_answer_openai,
+    _strip_noise_sections,
+    _normalize_general_output,
+    detect_lang,
+)
+
+FIRST_PERSON_PATTERNS = (
+    "меня зовут",
+    "обо мне",
+    "о себе",
+    "немного фактов обо мне",
+)
+SOFT_VEC_DOC = 0.45
+
+DOC_META_ANCHORS = (
+    "документ",
+    "текст",
+    "document",
+)
+
+DOC_META_INTENTS = (
+    "как называется",
+    "название",
+    "title",
+    "name",
+    "что это за",
+    "what is this",
+    "о чем",
+    "о чём",
+    "about this",
+    "как заканчивается",
+    "чем заканчивается",
+    "ending",
+    "финал",
+)
+
+DOC_TITLE_INTENTS = (
+    "как называется",
+    "название",
+    "title",
+    "name",
+)
+
+
+def _norm_q(s: str) -> str:
+    """
+    Minimal RU normalization for intent matching:
+    - lowercasing
+    - "ё" -> "е" (so "чём" matches "чем"/"о чем")
+    """
+    return (s or "").strip().lower().replace("ё", "е")
+
+
+RU_TRIVIAL_TERMS = {
+    "есть",  # common verb, causes false keyword hits (e.g., "как есть шаурму")
+    "это",
+    "как",
+    "что",
+    "где",
+    "когда",
+    "делать",
+}
+
+
+def _is_authorish_question(question: str) -> bool:
+    q = (question or "").strip().lower()
+    if not q:
+        return False
+    ru = ("кто автор", "автор", "кто написал", "кто пишет", "как зовут", "имя автора")
+    en = ("who is the author", "author", "who wrote", "who writes", "what is your name", "who are you")
+    return any(k in q for k in (ru + en))
+
+
+def _has_nontrivial_kw_terms(retrieved: list) -> bool:
+    for r in (retrieved or []):
+        terms = (r or {}).get("matched_terms") or []
+        for t in terms:
+            tt = (t or "").strip().lower()
+            if len(tt) < 3:
+                continue
+            if tt in RU_TRIVIAL_TERMS:
+                continue
+            return True
+    return False
+
+
+def _is_doc_metadata_question(question: str) -> bool:
+    q = (question or "").strip().lower()
+    return bool(q) and any(a in q for a in DOC_META_ANCHORS) and any(i in q for i in DOC_META_INTENTS)
+
 
 @api_view(["GET"])
 def health(request):
     return Response({"status": "ok"})
+
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -127,6 +223,28 @@ def deterministic_synthesis(question: str, retrieved: list[dict]) -> str:
         return "\n".join(lines)
 
     return " ".join(parts)
+
+
+def _has_first_person_intro(chunks: list[dict] | None) -> bool:
+    for r in (chunks or [])[:3]:
+        snippet = (r.get("snippet") or "").lower()
+        text = (r.get("text") or "").lower()
+        blob = f"{snippet} {text}"
+        for pat in FIRST_PERSON_PATTERNS:
+            if pat in blob:
+                return True
+    return False
+
+
+def _is_doc_metadata_question(question: str) -> bool:
+    q = _norm_q(question)
+    return bool(q) and any(a in q for a in DOC_META_ANCHORS) and any(i in q for i in DOC_META_INTENTS)
+
+def _is_doc_title_question(question: str) -> bool:
+    q = _norm_q(question)
+    return bool(q) and any(a in q for a in DOC_META_ANCHORS) and any(i in q for i in DOC_TITLE_INTENTS)
+
+
 
 def request_hash(payload: dict) -> str:
     """Hash request payload for idempotency safety (must include all behavior-changing fields)."""
@@ -377,6 +495,130 @@ def sanitize_sources(items):
         d.pop("text", None)
     return out
 
+
+def _add_out_of_doc_notice(notice: str, document_id: Optional[int]) -> str:
+    if document_id is not None and not (notice or "").strip():
+        return "out_of_document"
+    return notice
+
+
+def _wants_list(question: str) -> bool:
+    q = (question or "").lower()
+    return any(k in q for k in ("список", "списком", "перечисл", "перечень", "пункт", "буллет", "bullet"))
+
+
+def _strip_inline_citations(s: str) -> str:
+    return re.sub(r"\s*\[\d+\]\s*", " ", (s or "")).strip()
+
+
+def _extract_cited_indices(text: str) -> set:
+    cited = set()
+    for m in re.findall(r"\[(\d+)\]", text or ""):
+        try:
+            cited.add(int(m))
+        except Exception:
+            continue
+    return cited
+
+
+def _filter_sources_by_citations(answer_with_citations: str, sources: list, max_items: int = 3) -> list:
+    """Keep only sources whose 1-based index [i] is cited in the answer text. If no citations -> first max_items."""
+    srcs = list(sources or [])
+    if not srcs:
+        return []
+    cited = _extract_cited_indices(answer_with_citations or "")
+    if cited:
+        filtered = [it for idx, it in enumerate(srcs, start=1) if idx in cited]
+        if filtered:
+            return filtered[:max_items]
+    return srcs[:max_items]
+
+
+def _trim_doc_answer_sections(structured_text: str) -> str:
+    """Keep only the answer block; drop Quotes/Цитаты and Sources/Источники sections."""
+    t = (structured_text or "").strip()
+    if not t:
+        return ""
+    stop_heads = (
+        "источники:",
+        "sources:",
+        "источник:",
+        "source:",
+        "цитаты:",
+        "quotes:",
+    )
+    kept = []
+    for raw in t.splitlines():
+        line = (raw or "").strip()
+        if line and any(line.lower().startswith(h) for h in stop_heads):
+            break
+        kept.append(raw)
+    return "\n".join(kept).strip()
+
+def _format_doc_answer(question: str, structured_text: str, max_lines: int = 2) -> str:
+    """UX contract for doc_rag: 1–2 lines, strictly from document, NO headings, no inline [n] in answer."""
+    t = (structured_text or "").strip()
+    if not t:
+        return ""
+    answer_line = ""
+    detail_lines = []
+    stop_heads = (
+        "источники:",
+        "sources:",
+        "источник:",
+        "source:",
+        "цитаты:",
+        "quotes:",
+    )
+    in_details = False
+    for raw in t.splitlines():
+        line = (raw or "").strip()
+        low = line.lower()
+        if not line:
+            continue
+        if any(low.startswith(h) for h in stop_heads):
+            break
+        if low.startswith("ответ:"):
+            answer_line = line.split(":", 1)[1].strip()
+            in_details = False
+            continue
+        if low.startswith("answer:"):
+            answer_line = line.split(":", 1)[1].strip()
+            in_details = False
+            continue
+        if low.startswith("детали:"):
+            in_details = True
+            continue
+        if in_details and line.startswith(("-", "•")):
+            detail_lines.append(line.lstrip("-•").strip())
+    base = _strip_inline_citations(answer_line) or _strip_inline_citations(t.splitlines()[0] if t.splitlines() else t)
+    base = " ".join(base.split())
+    wants_list = _wants_list(question)
+    if wants_list and detail_lines:
+        facts = []
+        for dl in detail_lines:
+            dl = _strip_inline_citations(dl)
+            dl = " ".join((dl or "").split())
+            if dl:
+                facts.append(dl)
+        facts_text = "; ".join(facts).strip(" ;")
+        lines = [base, facts_text] if facts_text else [base]
+    else:
+        lines = [base]
+    out = []
+    for ln in lines:
+        ln = (ln or "").strip()
+        # Fix common spacing artifacts before punctuation (e.g., "Arina ." / "Арина .")
+        ln = re.sub(r"\s+([.,!?;:])", r"\1", ln)
+        # Also normalize multiple spaces just in case
+        ln = re.sub(r"\s{2,}", " ", ln).strip()
+        if ln:
+            out.append(ln)
+        if len(out) >= max_lines:
+            break
+    return "\n".join(out).strip()
+
+
 def get_sources_from_run(run: AgentRun):
     step = run.steps.filter(name="retrieve_context").order_by("-id").first()
     if not step:
@@ -385,11 +627,34 @@ def get_sources_from_run(run: AgentRun):
     return sanitize_sources(out.get("results", []) or [])
 
 
+# --------------------
+# Language helpers (minimal, no deps)
+# --------------------
+CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
+
+
+def _detect_lang(text: Optional[str]) -> str:
+    """Return 'ru' if text contains Cyrillic, else 'en'."""
+    return "ru" if text and CYRILLIC_RE.search(text) else "en"
+
+
+def _general_answer_deterministic(question: str) -> str:
+    q = " ".join((question or "").strip().split())
+    lang = _detect_lang(q)
+    if lang == "ru":
+        return f"В документе нет информации по вопросу: {q}."
+    return f"This document does not contain information about {q}."
+
+
 def _validate_and_repair_fallback(question: str, draft: str) -> str:
     """Validate fallback answer; if invalid, call repair_fallback_openai and return repaired answer."""
     q = (question or "").strip()
     d = (draft or "").strip()
     if not d:
+        return draft
+    # IMPORTANT: repair_fallback_openai is RU-only today (llm.py), so for EN questions
+    # we must NOT enforce RU templates or call RU repair. Formatting is handled in ensure_general_sections().
+    if _detect_lang(question) == "en":
         return draft
     expected_legacy = "В данном документе нет информации, чтобы ответить на: " + q + "."
     first_line = (d.split("\n")[0] or "").strip()
@@ -446,11 +711,13 @@ def _trim_answer_line_citations(text: str) -> str:
 
 
 def ensure_doc_sections(answer_text: str, retrieved: list) -> str:
-    """If answer has Ответ/Детали/Источники return as-is; else build structured text from retrieved."""
+    """If answer has Ответ/Детали/Источники or Answer/Sources (EN) return as-is; else build structured text from retrieved."""
     if not (answer_text or "").strip() or not retrieved:
         return answer_text or ""
     t = (answer_text or "").strip()
     if "Ответ:" in t and "Детали:" in t and "Источники:" in t:
+        return answer_text
+    if "Answer:" in t and "Sources:" in t:
         return answer_text
     top = (retrieved or [])[:5]
     if any(((r or {}).get("snippet") or (r or {}).get("text") or "").strip().startswith("Шаг ") for r in top):
@@ -507,99 +774,98 @@ def ensure_doc_sections(answer_text: str, retrieved: list) -> str:
 
 
 def ensure_general_sections(question: str, answer_text: str) -> str:
-    """Ensure NO-DOC (route=general) output follows the UX contract:
-    1) one honest line that doc has no answer
-    2) a helpful general answer (not from document)
-    3) one gentle hint how to get a doc-grounded answer
-    """
+    """Sanitize general answers: remove legacy 'no-doc' wrapper while preserving deterministic one-liners."""
     if not (answer_text or "").strip():
         return answer_text or ""
 
     t = (answer_text or "").strip()
+    lang = _detect_lang(question)
 
-    # If it already looks like the desired 3-part structure, keep as-is.
-    if t.startswith("В этом документе нет информации") and "\n\n" in t and "Если вам нужен ответ" in t:
+    # Define legacy wrapper markers
+    hint_ru = "Если вам нужен ответ именно по документу, задайте вопрос о конкретном фрагменте или загрузите текст, где эта тема упоминается."
+    hint_en = "If you need an answer from the document, ask about a specific fragment or upload a text where this topic appears."
+    header_ru = "Общий ответ вне документа:"
+    header_en = "General answer (outside the document):"
+
+    # Detect legacy wrapper markers
+    has_ru_marker = header_ru in t or hint_ru in t
+    has_en_marker = header_en in t or hint_en in t
+    has_legacy_marker = has_ru_marker or has_en_marker
+
+    # If NO legacy marker present: return unchanged (preserves deterministic one-liners)
+    if not has_legacy_marker:
         return t
 
-    # Remove legacy NO-DOC template headings / boilerplate if present.
-    drop_prefixes = (
+    # Legacy marker present: strip wrapper parts
+    lines = [ln.strip() for ln in t.splitlines() if (ln or "").strip()]
+    cleaned_lines = []
+    legacy_heads = (
         "Проверка по документу:",
         "Что именно отсутствует:",
         "Общий ответ (не из документа):",
         "Как получить точный ответ по документу:",
     )
-    kept_lines = []
-    for line in t.splitlines():
-        l = (line or "").strip()
-        if not l:
-            continue
-        if any(l.startswith(p) for p in drop_prefixes):
-            continue
-        # drop legacy bullet-style "missing fragments" noise
-        if l.startswith("- Нет релевантных фрагментов"):
-            continue
-        if l.startswith("Это общий ответ, не из документа"):
-            continue
-        kept_lines.append(l)
 
-    general = "\n".join(kept_lines).strip() or t
+    for ln in lines:
+        # Skip disclaimer lines
+        if ln.startswith("В этом документе нет информации") or ln.startswith("This document does not contain information"):
+            continue
+        # Skip wrapper headers
+        if ln == header_ru or ln == header_en or ln.startswith(header_ru) or ln.startswith(header_en):
+            continue
+        # Skip hint lines
+        if ln == hint_ru or ln == hint_en:
+            continue
+        # Skip legacy headings
+        if any(ln.startswith(h) for h in legacy_heads):
+            continue
+        # Skip legacy bullet noise
+        if ln.startswith("- В документе нет достаточных фрагментов"):
+            continue
+        if ln.startswith("- Уточните формулировку"):
+            continue
+        if ln.startswith("- Можно переформулировать"):
+            continue
+        if ln.startswith("- Найдите в документе фрагмент"):
+            continue
+        if ln.startswith("- Задайте вопрос по конкретному месту"):
+            continue
+        if ln.startswith("- Нет релевантных фрагментов"):
+            continue
+        if ln.startswith("Это общий ответ, не из документа"):
+            continue
+        cleaned_lines.append(ln)
 
-    honest = "В этом документе нет информации, чтобы ответить на ваш вопрос."
-    hint = "Если вам нужен ответ именно по документу, задайте вопрос о конкретном фрагменте или загрузите текст, где эта тема упоминается."
-    return f"{honest}\n\n{general}\n\n{hint}"
+    # Limit to ~10 lines
+    cleaned_lines = cleaned_lines[:10]
+    result = "\n".join(cleaned_lines).strip()
+
+    # Fallback if nothing remains
+    if not result:
+        return "Не знаю." if lang == "ru" else "I don't know."
+
+    return result
 
 
 def _validate_and_repair_doc_answer(question: str, retrieved: list, draft: str) -> tuple:
-    """Validate doc answer format; if invalid, call repair_doc_answer_openai. Returns (answer_str, llm_used_if_repaired_or_None)."""
+    """Validate doc answer format; if invalid, call repair_doc_answer_openai. Language-aware: EN uses Answer/Sources (optional Quotes), RU uses Ответ/Источники (optional Цитаты). Returns (answer_str, llm_used_if_repaired_or_None)."""
     d = (draft or "").strip()
     if not d:
         return (draft, None)
-    if "Ответ:" not in d or "Детали:" not in d or "Источники:" not in d:
-        try:
-            context = _build_doc_context(retrieved)
-            out = repair_doc_answer_openai(question, context, draft)
-            return ((out.get("answer") or "").strip() or draft, out.get("llm_used"))
-        except Exception:
-            return (draft, None)
-    refusal = "В документе нет прямого ответа на этот вопрос." in d
-    detali_idx = d.find("Детали:")
-    istoki_idx = d.find("Источники:")
-    if detali_idx == -1 or istoki_idx == -1:
-        try:
-            context = _build_doc_context(retrieved)
-            out = repair_doc_answer_openai(question, context, draft)
-            return ((out.get("answer") or "").strip() or draft, out.get("llm_used"))
-        except Exception:
-            return (draft, None)
-    detali_section = d[detali_idx:istoki_idx]
-    bullet_lines = [ln.strip() for ln in detali_section.splitlines() if ln.strip().startswith(("-", "•"))]
-    if len(bullet_lines) < 3:
-        try:
-            context = _build_doc_context(retrieved)
-            out = repair_doc_answer_openai(question, context, draft)
-            return ((out.get("answer") or "").strip() or draft, out.get("llm_used"))
-        except Exception:
-            return (draft, None)
-    citation_re = re.compile(r"\[\d+\]")
-    for bl in bullet_lines:
-        if not citation_re.search(bl):
+    lang = detect_lang(question)
+    if lang == "en":
+        has_answer = "Answer:" in d
+        has_sources = "Sources:" in d
+        if not has_answer or not has_sources:
             try:
                 context = _build_doc_context(retrieved)
                 out = repair_doc_answer_openai(question, context, draft)
                 return ((out.get("answer") or "").strip() or draft, out.get("llm_used"))
             except Exception:
                 return (draft, None)
-        has_quote = "«" in bl or "»" in bl or '"' in bl
-        if not has_quote:
-            try:
-                context = _build_doc_context(retrieved)
-                out = repair_doc_answer_openai(question, context, draft)
-                return ((out.get("answer") or "").strip() or draft, out.get("llm_used"))
-            except Exception:
-                return (draft, None)
-    istoki_section = d[istoki_idx:]
-    istoki_items = [ln.strip() for ln in istoki_section.splitlines() if ln.strip() and not ln.strip().startswith("Источники:")]
-    if not refusal and len(istoki_items) < 2:
+        return (draft, None)
+    # RU: require Ответ: and Источники: (optional Цитаты:). Do not require Детали:.
+    if "Ответ:" not in d or "Источники:" not in d:
         try:
             context = _build_doc_context(retrieved)
             out = repair_doc_answer_openai(question, context, draft)
@@ -729,10 +995,36 @@ def ask(request):
                 step_out = (step.output_json or {}) if step else {}
                 route_replay = step_out.get("route") or ("summary" if retriever_used == "summary" else "")
                 notice_replay = step_out.get("notice") or ""
+                if route_replay == "doc_rag":
+                    answer_replay = _format_doc_answer(run.question or "", _strip_noise_sections(run.final_output or ""))
+                    sources_replay = sanitize_sources(
+                        _filter_sources_by_citations(
+                            _strip_noise_sections(run.final_output or ""),
+                            sources,
+                            max_items=3,
+                        )
+                    )
+                elif route_replay == "general":
+                    # For deterministic/sources_only, do NOT expand into general template.
+                    # Return stored deterministic output verbatim (after noise strip),
+                    # so replay UX matches live execution.
+                    if (answer_mode_prev or "") in ("deterministic", "sources_only"):
+                        answer_replay = _strip_noise_sections(run.final_output or "")
+                    else:
+                        answer_replay = _strip_noise_sections(
+                            ensure_general_sections(
+                                run.question or "",
+                                _normalize_general_output(run.final_output or "", run.question or ""),
+                            )
+                        )
+                    sources_replay = []
+                else:
+                    answer_replay = _strip_noise_sections(run.final_output or "")
+                    sources_replay = sanitize_sources(sources)
                 resp = {
                     "run_id": run.id,
-                    "answer": _strip_noise_sections(run.final_output or ""),
-                    "sources": sources,
+                    "answer": answer_replay,
+                    "sources": sources_replay,
                     "retriever_used": retriever_used,
                     "llm_used": llm_used_prev or "none",
                     "answer_mode": answer_mode_prev or "",
@@ -765,7 +1057,7 @@ def ask(request):
         retriever_used = "keyword"
         llm_used = "none"
 
-        summary_triggers = ("о чем", "про что", "кратко", "краткое содержание", "summary", "summarize", "обзор")
+        summary_triggers = ("о чем", "про что", "кратко", "краткое содержание", "summary", "summarize", "обзор", "суть", "главное", "основная мысль", "идея", "выжимка")
         q_lower = (question or "").strip().lower()
         is_summary = document_id is not None and answer_mode != "sources_only" and any(t in q_lower for t in summary_triggers)
 
@@ -875,8 +1167,13 @@ def ask(request):
                     "text": txt,
                     "retriever_hint": "doc_fallback",
                 })
-            if retrieved:
-                retriever_used = "doc_fallback"
+            # MVP: if user scoped to a document, keep doc mode even on weak retrieval
+            retriever_used = "doc_fallback"
+            if not retrieved:
+                try:
+                    notice = (notice + ";doc_fallback_empty") if notice else "doc_fallback_empty"
+                except Exception:
+                    notice = "doc_fallback_empty"
 
         V_THR = 0.55
         V_HARD = 0.70
@@ -886,25 +1183,42 @@ def ask(request):
         else:
             best_kw = max((float(r.get("keyword_score") or 0) for r in retrieved), default=0)
         best_vec = max((float(r.get("vector_score") or 0) for r in retrieved), default=0)
-        mt_list = (r.get("matched_terms") or [] for r in retrieved)
-        has_kw_hit = (best_kw > 0) or any(len(m) > 0 if isinstance(m, (list, tuple)) else bool(m) for m in mt_list)
-        relevant = (best_kw >= KW_THR) or (has_kw_hit and best_vec >= V_THR) or (best_vec >= V_HARD)
+        # Keyword evidence must be non-trivial (avoid false hits like "есть")
+        kw_evidence = _has_nontrivial_kw_terms(retrieved)
+        has_kw_hit = bool(kw_evidence)
+
+        # Soft first-person intro should only help for author/identity questions, not arbitrary ones
+        soft_kw_hit = bool(
+            document_id is not None and retrieved and best_vec >= SOFT_VEC_DOC
+            and _has_first_person_intro(retrieved) and _is_authorish_question(question)
+        )
+        doc_meta_intent = bool(document_id is not None and _is_doc_metadata_question(question))
+        doc_title_intent = bool(document_id is not None and _is_doc_title_question(question))
+        doc_title_value = ""
+        if doc_title_intent:
+            doc_title_value = (Document.objects.filter(id=document_id).values_list("title", flat=True).first() or "").strip()
+        relevant = ((best_kw >= KW_THR) and kw_evidence) or (has_kw_hit and best_vec >= V_THR) or (document_id is None and best_vec >= V_HARD)
         max_score = max((float(r.get("final_score") or r.get("vector_score") or r.get("score") or 0) for r in retrieved), default=0)
+
         # Hard gate: keep NO-DOC out of doc_rag, but don't over-prune borderline DOC queries.
         # "велосипед" had max_score≈0.52, so 0.55 still routes to general.
-        if max_score < 0.55:
+        if max_score < 0.55 and not doc_meta_intent:
             relevant = False
         # IMPORTANT: document_id does NOT automatically grant doc_rag.
         # Invariant (CI smoke is source of truth):
         # - document_id must NOT enable doc_rag on vector-only similarity
         # - doc_rag for document-scoped queries requires keyword evidence (has_kw_hit)
-        if document_id is not None and retrieved and has_kw_hit:
+        if document_id is not None and retrieved and (has_kw_hit or soft_kw_hit or doc_meta_intent):
             relevant = True
         debug_payload = {
             "best_kw": best_kw,
             "best_vec": best_vec,
             "relevant": relevant,
             "has_kw_hit": has_kw_hit,
+            "soft_kw_hit": soft_kw_hit,
+            "doc_meta_intent": doc_meta_intent,
+            "doc_title_intent": doc_title_intent,
+            "kw_evidence": kw_evidence,
             "V_THR": V_THR,
             "V_HARD": V_HARD,
             "KW_THR": KW_THR,
@@ -934,13 +1248,62 @@ def ask(request):
                 "debug": debug_payload,
             })
 
+        if doc_title_intent and doc_title_value and retrieved:
+            AgentStep.objects.create(
+                run=run,
+                name="retrieve_context",
+                input_json={"question": question, "top_k": top_k, "retriever": retriever, "document_id": document_id},
+                output_json={"results": sanitize_sources(retrieved), "retriever_used": retriever_used, "route": "doc_rag", "notice": "", "debug": debug_payload},
+                status="ok",
+            )
+            run.status = "success"
+            run.final_output = doc_title_value
+            run.save(update_fields=["status", "final_output"])
+            try:
+                if hasattr(run, "llm_used"):
+                    run.llm_used = "none"
+                    run.save(update_fields=["llm_used"])
+            except Exception:
+                pass
+            try:
+                AgentStep.objects.create(
+                    run=run,
+                    name="generate_answer",
+                    input_json={"question": question, "answer_mode": answer_mode, "document_id": document_id},
+                    output_json={
+                        "llm_used": "none",
+                        "answer_mode": answer_mode,
+                        "route": "doc_rag",
+                        "answer_preview": (run.final_output or "")[:500],
+                    },
+                    status="success",
+                )
+            except Exception:
+                pass
+            return Response({
+                "run_id": run.id,
+                "answer": _strip_noise_sections(run.final_output or ""),
+                "sources": sanitize_sources(retrieved),
+                "retriever_used": retriever_used,
+                "llm_used": "none",
+                "answer_mode": answer_mode,
+                "route": "doc_rag",
+                "notice": "",
+                "debug": debug_payload,
+            })
+
         if not retrieved:
             if document_id is not None:
-                notice = ""
-                out = general_answer_openai(question)
-                general_answer = out.get("answer", "")
-                general_answer = _validate_and_repair_fallback(question, general_answer)
-                llm_used = out.get("llm_used", "openai")
+                notice = _add_out_of_doc_notice("", document_id)
+                if answer_mode in ("deterministic", "sources_only"):
+                    general_answer = _general_answer_deterministic(question)
+                    llm_used = "none"
+                else:
+                    out = general_answer_openai(question)
+                    general_answer = out.get("answer", "")
+                    # skip repair for general answers (MVP clean LLM)
+                    general_answer = general_answer
+                    llm_used = out.get("llm_used", "openai")
                 AgentStep.objects.create(
                     run=run,
                     name="retrieve_context",
@@ -978,7 +1341,11 @@ def ask(request):
                     pass
                 return Response({
                     "run_id": run.id,
-                    "answer": _strip_noise_sections(ensure_general_sections(question or "", _normalize_general_output(run.final_output or "", question or ""))),
+                    "answer": (
+                        _strip_noise_sections(run.final_output or "")
+                        if answer_mode in ("deterministic", "sources_only")
+                        else _strip_noise_sections(run.final_output or "")
+                    ),
                     "sources": [],
                     "retriever_used": "general",
                     "llm_used": llm_used,
@@ -987,30 +1354,87 @@ def ask(request):
                     "notice": notice,
                     "debug": debug_payload,
                 })
-            run.status = "success"
-            run.final_output = (
-                "I couldn't find relevant knowledge in the KB for this question.\n"
-                "Try uploading more docs or rephrasing the query."
+            # No retrieved context and no document selected -> general answer path (language-aware)
+            notice = _add_out_of_doc_notice("", document_id)
+            if answer_mode in ("deterministic", "sources_only"):
+                general_answer = _general_answer_deterministic(question)
+                llm_used = "none"
+            else:
+                out = general_answer_openai(question)
+                general_answer = out.get("answer", "")
+                # skip repair for general answers (MVP clean LLM)
+                general_answer = general_answer
+                llm_used = out.get("llm_used", "openai")
+
+            AgentStep.objects.create(
+                run=run,
+                name="retrieve_context",
+                input_json={"question": question, "top_k": top_k, "retriever": retriever, "document_id": document_id},
+                output_json={
+                    "results": [],
+                    "retriever_used": "general",
+                    "route": "general",
+                    "best_kw": best_kw,
+                    "best_vec": best_vec,
+                    "retriever_requested": retriever,
+                    "notice": notice,
+                    "debug": debug_payload,
+                },
+                status="ok",
             )
+
+            run.status = "success"
+            run.final_output = general_answer
             run.save(update_fields=["status", "final_output"])
+            try:
+                if hasattr(run, "llm_used"):
+                    run.llm_used = llm_used
+                    run.save(update_fields=["llm_used"])
+            except Exception:
+                pass
+            try:
+                AgentStep.objects.create(
+                    run=run,
+                    name="generate_answer",
+                    input_json={"question": question, "answer_mode": answer_mode},
+                    output_json={
+                        "llm_used": llm_used,
+                        "answer_mode": answer_mode,
+                        "route": "general",
+                        "answer_preview": (run.final_output or "")[:500],
+                    },
+                    status="success",
+                )
+            except Exception:
+                pass
+
             return Response({
                 "run_id": run.id,
-                "answer": _strip_noise_sections(run.final_output or ""),
+                "answer": (
+                    _strip_noise_sections(run.final_output or "")
+                    if answer_mode in ("deterministic", "sources_only")
+                    else _strip_noise_sections(run.final_output or "")
+                ),
                 "sources": [],
                 "retriever_used": "general",
                 "llm_used": llm_used,
                 "answer_mode": answer_mode,
                 "route": "general",
-                "notice": "",
+                "notice": notice,
                 "debug": debug_payload,
             })
 
         if not relevant:
-            notice = ""
-            out = general_answer_openai(question)
-            general_answer = out.get("answer", "")
-            general_answer = _validate_and_repair_fallback(question, general_answer)
-            llm_used = out.get("llm_used", "openai")
+            notice = _add_out_of_doc_notice("", document_id)
+            if answer_mode in ("deterministic", "sources_only"):
+                general_answer = _general_answer_deterministic(question)
+                llm_used = "none"
+            else:
+                out = general_answer_openai(question)
+                general_answer = out.get("answer", "")
+                # skip repair for general answers (MVP clean LLM)
+                general_answer = general_answer
+                llm_used = out.get("llm_used", "openai")
             AgentStep.objects.create(
                 run=run,
                 name="retrieve_context",
@@ -1048,7 +1472,11 @@ def ask(request):
                 pass
             return Response({
                 "run_id": run.id,
-                "answer": _strip_noise_sections(ensure_general_sections(question or "", _normalize_general_output(run.final_output or "", question or ""))),
+                "answer": (
+                    _strip_noise_sections(run.final_output or "")
+                    if answer_mode in ("deterministic", "sources_only")
+                    else _strip_noise_sections(run.final_output or "")
+                ),
                 "sources": [],
                 "retriever_used": "general",
                 "llm_used": llm_used,
@@ -1077,11 +1505,6 @@ def ask(request):
             out = rag_answer_openai(question, retrieved)
             llm_used = out.get("llm_used", "openai")
             run.final_output = out.get("answer", "")
-            repaired, repair_llm = _validate_and_repair_doc_answer(question, retrieved, run.final_output)
-            run.final_output = repaired
-            run.final_output = ensure_doc_sections(run.final_output, retrieved)
-            if repair_llm is not None:
-                llm_used = repair_llm
         else:
             run.status = "error"
             run.error = f"unknown answer_mode: {answer_mode}"
@@ -1115,7 +1538,23 @@ def ask(request):
             pass
 
         return Response(
-            {"run_id": run.id, "answer": _trim_answer_line_citations(_strip_noise_sections(run.final_output or "")), "sources": sanitize_sources(retrieved), "retriever_used": retriever_used, "llm_used": llm_used, "answer_mode": answer_mode, "route": "doc_rag", "notice": "", "debug": debug_payload}
+            {
+                "run_id": run.id,
+                "answer": _format_doc_answer(question, _strip_noise_sections(run.final_output or "")),
+                "sources": sanitize_sources(
+                    _filter_sources_by_citations(
+                        _strip_noise_sections(run.final_output or ""),
+                        retrieved,
+                        max_items=3,
+                    )
+                ),
+                "retriever_used": retriever_used,
+                "llm_used": llm_used,
+                "answer_mode": answer_mode,
+                "route": "doc_rag",
+                "notice": "",
+                "debug": debug_payload,
+            }
         )
 
     except Exception as e:
