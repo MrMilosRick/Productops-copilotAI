@@ -992,9 +992,19 @@ def ask(request):
                     llm_used_prev = (gen.output_json or {}).get("llm_used") or llm_used_prev
                     answer_mode_prev = (gen.output_json or {}).get("answer_mode") or answer_mode_prev
 
+                llm_used_replay = llm_used_prev or "none"
+
                 step_out = (step.output_json or {}) if step else {}
+                step_in = (step.input_json or {}) if step else {}
                 route_replay = step_out.get("route") or ("summary" if retriever_used == "summary" else "")
                 notice_replay = step_out.get("notice") or ""
+                doc_scoped_general_replay = (
+                    route_replay == "general"
+                    and (
+                        notice_replay == "out_of_document"
+                        or step_in.get("document_id") is not None
+                    )
+                )
                 if route_replay == "doc_rag":
                     answer_replay = _format_doc_answer(run.question or "", _strip_noise_sections(run.final_output or ""))
                     sources_replay = sanitize_sources(
@@ -1008,7 +1018,10 @@ def ask(request):
                     # For deterministic/sources_only, do NOT expand into general template.
                     # Return stored deterministic output verbatim (after noise strip),
                     # so replay UX matches live execution.
-                    if (answer_mode_prev or "") in ("deterministic", "sources_only"):
+                    if doc_scoped_general_replay:
+                        answer_replay = _general_answer_deterministic(run.question or "")
+                        llm_used_replay = "none"
+                    elif (answer_mode_prev or "") in ("deterministic", "sources_only"):
                         answer_replay = _strip_noise_sections(run.final_output or "")
                     else:
                         answer_replay = _strip_noise_sections(
@@ -1026,7 +1039,7 @@ def ask(request):
                     "answer": answer_replay,
                     "sources": sources_replay,
                     "retriever_used": retriever_used,
-                    "llm_used": llm_used_prev or "none",
+                    "llm_used": llm_used_replay,
                     "answer_mode": answer_mode_prev or "",
                     "route": route_replay,
                     "notice": notice_replay,
@@ -1295,15 +1308,8 @@ def ask(request):
         if not retrieved:
             if document_id is not None:
                 notice = _add_out_of_doc_notice("", document_id)
-                if answer_mode in ("deterministic", "sources_only"):
-                    general_answer = _general_answer_deterministic(question)
-                    llm_used = "none"
-                else:
-                    out = general_answer_openai(question)
-                    general_answer = out.get("answer", "")
-                    # skip repair for general answers (MVP clean LLM)
-                    general_answer = general_answer
-                    llm_used = out.get("llm_used", "openai")
+                general_answer = _general_answer_deterministic(question)
+                llm_used = "none"
                 AgentStep.objects.create(
                     run=run,
                     name="retrieve_context",
@@ -1426,7 +1432,7 @@ def ask(request):
 
         if not relevant:
             notice = _add_out_of_doc_notice("", document_id)
-            if answer_mode in ("deterministic", "sources_only"):
+            if answer_mode in ("deterministic", "sources_only") or document_id is not None:
                 general_answer = _general_answer_deterministic(question)
                 llm_used = "none"
             else:
