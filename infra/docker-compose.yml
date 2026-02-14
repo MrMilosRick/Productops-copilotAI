@@ -11,8 +11,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     restart: unless-stopped
 
   uploads-init:
@@ -35,7 +33,7 @@ services:
       redis: { condition: service_started }
       uploads-init: { condition: service_completed_successfully }
     ports:
-      - "8001:8000"
+      - "127.0.0.1:18001:8000"
     restart: unless-stopped
     user: "100:101"
     volumes:
