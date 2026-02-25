@@ -91,3 +91,7 @@ openai_resp_dump.json
 
 # local test data
 /data/
+
+# local env
+.env
+.env.*

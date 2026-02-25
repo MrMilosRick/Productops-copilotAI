@@ -1,7 +1,7 @@
 .PHONY: up down logs health smoke qa-mvp lint ci-smoke dev-smoke ui-dev ui-build ui-sync
 
 COMPOSE = docker compose -f infra/docker-compose.yml
-BASE_URL ?= http://localhost:8001
+BASE_URL ?= http://localhost:18001
 
 up:
 	@$(COMPOSE) up -d --build

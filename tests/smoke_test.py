@@ -9,7 +9,7 @@ import urllib.request
 import urllib.error
 from typing import Any, Dict, Optional, Tuple
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:8001").rstrip("/")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:18001").rstrip("/")
 TIMEOUT_S = int(os.environ.get("SMOKE_TIMEOUT", "90"))
 
 REQ_TIMEOUT_DEFAULT = int(os.environ.get("SMOKE_REQ_TIMEOUT", "15"))

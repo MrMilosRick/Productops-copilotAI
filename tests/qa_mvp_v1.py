@@ -7,7 +7,7 @@ import time
 from typing import Dict, Any, Tuple, List
 
 
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8001").rstrip("/")
+BASE_URL = os.getenv("BASE_URL", "http://localhost:18001").rstrip("/")
 API_UPLOAD_TEXT = f"{BASE_URL}/api/kb/upload_text/"
 API_DOC_DETAIL = f"{BASE_URL}/api/kb/documents/{{document_id}}/"
 API_ASK = f"{BASE_URL}/api/ask/"
