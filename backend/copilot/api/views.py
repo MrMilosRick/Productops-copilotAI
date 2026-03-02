@@ -1,5 +1,6 @@
 import hashlib
 import re
+import time
 import uuid
 from typing import Optional
 
@@ -100,7 +101,39 @@ def _is_authorish_question(question: str) -> bool:
     return any(k in q for k in (ru + en))
 
 
-def _has_nontrivial_kw_terms(retrieved: list) -> bool:
+def _detect_ru(text: str) -> bool:
+    """True if text contains Cyrillic."""
+    return bool(re.search(r"[А-Яа-яЁё]", text or ""))
+
+
+def _ru_stem(word: str) -> str:
+    """Minimal stem for RU keyword evidence: lowercase prefix."""
+    w = (word or "").strip().lower()
+    if len(w) < 3:
+        return w
+    return w[:5] if len(w) >= 4 else w
+
+
+def _question_kw_evidence(question: str, retrieved: list) -> bool:
+    """True if >=2 distinct question stems appear in retrieved snippet/text (RU fallback)."""
+    words = re.findall(r"[а-яёa-z]{3,}", (question or "").lower())
+    stems = set()
+    for w in words:
+        if w in RU_TRIVIAL_TERMS:
+            continue
+        stems.add(_ru_stem(w))
+    if len(stems) < 2:
+        return False
+    hits = set()
+    for r in (retrieved or []):
+        text = (r.get("snippet") or r.get("text") or "").lower()
+        for st in stems:
+            if st in text:
+                hits.add(st)
+    return len(hits) >= 2
+
+
+def _has_nontrivial_kw_terms(retrieved: list, question: str = "") -> bool:
     for r in (retrieved or []):
         terms = (r or {}).get("matched_terms") or []
         for t in terms:
@@ -110,6 +143,8 @@ def _has_nontrivial_kw_terms(retrieved: list) -> bool:
             if tt in RU_TRIVIAL_TERMS:
                 continue
             return True
+    if question and _detect_ru(question):
+        return _question_kw_evidence(question, retrieved)
     return False
 
 
@@ -494,6 +529,79 @@ def sanitize_sources(items):
     for d in out:
         d.pop("text", None)
     return out
+
+
+def _retrieved_chunk_uids(retrieved_items):
+    """Map retrieved dicts to chunk_uid list (batch). Prefer chunk_uid; else chunk_id/id; else (document_id, chunk_index)."""
+    if not retrieved_items:
+        return []
+    out = []
+    pks = []
+    pairs = []
+    for r in (retrieved_items or []):
+        if not isinstance(r, dict):
+            out.append(None)
+            continue
+        if r.get("chunk_uid"):
+            out.append(r.get("chunk_uid"))
+            continue
+        pk = r.get("chunk_id") or r.get("id")
+        if pk is not None:
+            try:
+                pks.append(int(pk))
+            except (TypeError, ValueError):
+                pks.append(None)
+            out.append(("pk", len(pks) - 1))
+            continue
+        doc_id = r.get("document_id")
+        ch_idx = r.get("chunk_index")
+        if doc_id is not None and ch_idx is not None:
+            try:
+                pairs.append((int(doc_id), int(ch_idx)))
+            except (TypeError, ValueError):
+                out.append(None)
+                continue
+            out.append(("pair", len(pairs) - 1))
+            continue
+        out.append(None)
+    pk_to_uid = {}
+    if pks:
+        valid_pks = [x for x in pks if x is not None]
+        if valid_pks:
+            for pk, uid in EmbeddingChunk.objects.filter(pk__in=valid_pks).values_list("pk", "chunk_uid"):
+                pk_to_uid[pk] = uid or None
+    pair_to_uid = {}
+    if pairs:
+        seen_docs = {p[0] for p in pairs}
+        for doc_id in seen_docs:
+            indices = [p[1] for p in pairs if p[0] == doc_id]
+            for idx, uid in EmbeddingChunk.objects.filter(document_id=doc_id, chunk_index__in=indices).values_list("chunk_index", "chunk_uid"):
+                pair_to_uid[(doc_id, idx)] = uid or None
+    result = []
+    for x in out:
+        if x is None:
+            result.append(None)
+        elif isinstance(x, str) and x:
+            result.append(x)
+        elif isinstance(x, tuple) and x[0] == "pk":
+            result.append(pk_to_uid.get(pks[x[1]]))
+        elif isinstance(x, tuple) and x[0] == "pair":
+            result.append(pair_to_uid.get(pairs[x[1]]))
+        else:
+            result.append(None)
+    return [u for u in result if u]
+
+
+def _ask_telemetry(latency_ms_total, retriever_used, top_k, n_retrieved, token_usage=None):
+    return {
+        "latency_ms_total": latency_ms_total,
+        "ttft_ms": latency_ms_total,
+        "ttft_mode": "non_streaming_estimate",
+        "token_usage": token_usage,
+        "retriever_used": retriever_used or "",
+        "top_k": top_k,
+        "n_retrieved": n_retrieved,
+    }
 
 
 def _add_out_of_doc_notice(notice: str, document_id: Optional[int]) -> str:
@@ -898,6 +1006,11 @@ def normalize_source(r: dict) -> dict:
 
 @api_view(["POST"])
 def ask(request):
+    t0 = time.perf_counter()
+
+    def _lat_ms():
+        return int((time.perf_counter() - t0) * 1000)
+
     ser = AskSerializer(data=request.data)
     try:
         ser.is_valid(raise_exception=True)
@@ -1034,6 +1147,7 @@ def ask(request):
                 else:
                     answer_replay = _strip_noise_sections(run.final_output or "")
                     sources_replay = sanitize_sources(sources)
+                retrieved_for_ids = (step.output_json or {}).get("results", []) if step else sources_replay
                 resp = {
                     "run_id": run.id,
                     "answer": answer_replay,
@@ -1044,6 +1158,8 @@ def ask(request):
                     "route": route_replay,
                     "notice": notice_replay,
                     "idempotent_replay": True,
+                    "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved_for_ids),
+                    "telemetry": _ask_telemetry(_lat_ms(), retriever_used, step_in.get("top_k"), len(sources_replay or []), None),
                 }
                 return Response(resp)
 # 2) Create run (new execution)
@@ -1066,6 +1182,7 @@ def ask(request):
         )
 
     try:
+        notice = ""
         retrieved = []
         retriever_used = "keyword"
         llm_used = "none"
@@ -1090,6 +1207,8 @@ def ask(request):
                     "answer_mode": answer_mode,
                     "route": "summary",
                     "notice": "",
+                    "retrieved_chunk_ids": [],
+                    "telemetry": _ask_telemetry(_lat_ms(), "summary", top_k, 0, None),
                 })
             n = len(chunks)
             if n <= 12:
@@ -1144,6 +1263,8 @@ def ask(request):
                 "answer_mode": answer_mode,
                 "route": "summary",
                 "notice": "",
+                "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved),
+                "telemetry": _ask_telemetry(_lat_ms(), "summary", top_k, len(retrieved or []), None),
             })
 
         if retriever == "keyword":
@@ -1197,7 +1318,7 @@ def ask(request):
             best_kw = max((float(r.get("keyword_score") or 0) for r in retrieved), default=0)
         best_vec = max((float(r.get("vector_score") or 0) for r in retrieved), default=0)
         # Keyword evidence must be non-trivial (avoid false hits like "есть")
-        kw_evidence = _has_nontrivial_kw_terms(retrieved)
+        kw_evidence = _has_nontrivial_kw_terms(retrieved, question)
         has_kw_hit = bool(kw_evidence)
 
         # Soft first-person intro should only help for author/identity questions, not arbitrary ones
@@ -1259,6 +1380,8 @@ def ask(request):
                 "route": "doc_rag",
                 "notice": "",
                 "debug": debug_payload,
+                "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved),
+                "telemetry": _ask_telemetry(_lat_ms(), retriever_used, top_k, len(retrieved or []), None),
             })
 
         if doc_title_intent and doc_title_value and retrieved:
@@ -1303,6 +1426,8 @@ def ask(request):
                 "route": "doc_rag",
                 "notice": "",
                 "debug": debug_payload,
+                "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved),
+                "telemetry": _ask_telemetry(_lat_ms(), retriever_used, top_k, len(retrieved or []), None),
             })
 
         if not retrieved:
@@ -1359,6 +1484,8 @@ def ask(request):
                     "route": "general",
                     "notice": notice,
                     "debug": debug_payload,
+                    "retrieved_chunk_ids": [],
+                    "telemetry": _ask_telemetry(_lat_ms(), "general", top_k, 0, None),
                 })
             # No retrieved context and no document selected -> general answer path (language-aware)
             notice = _add_out_of_doc_notice("", document_id)
@@ -1428,6 +1555,8 @@ def ask(request):
                 "route": "general",
                 "notice": notice,
                 "debug": debug_payload,
+                "retrieved_chunk_ids": [],
+                "telemetry": _ask_telemetry(_lat_ms(), "general", top_k, 0, None),
             })
 
         if not relevant:
@@ -1490,6 +1619,8 @@ def ask(request):
                 "route": "general",
                 "notice": notice,
                 "debug": debug_payload,
+                "retrieved_chunk_ids": [],
+                "telemetry": _ask_telemetry(_lat_ms(), "general", top_k, 0, None),
             })
 
         AgentStep.objects.create(
@@ -1515,7 +1646,16 @@ def ask(request):
             run.status = "error"
             run.error = f"unknown answer_mode: {answer_mode}"
             run.save(update_fields=["status","error"])
-            return Response({"run_id": run.id, "error": run.error, "sources": sanitize_sources(retrieved), "retriever_used": retriever_used, "llm_used": "none", "answer_mode": answer_mode}, status=400)
+            return Response({
+                "run_id": run.id,
+                "error": run.error,
+                "sources": sanitize_sources(retrieved),
+                "retriever_used": retriever_used,
+                "llm_used": "none",
+                "answer_mode": answer_mode,
+                "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved),
+                "telemetry": _ask_telemetry(_lat_ms(), retriever_used, top_k, len(retrieved or []), None),
+            }, status=400)
         run.save(update_fields=["status", "final_output"])
 
 
@@ -1560,6 +1700,8 @@ def ask(request):
                 "route": "doc_rag",
                 "notice": "",
                 "debug": debug_payload,
+                "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved),
+                "telemetry": _ask_telemetry(_lat_ms(), retriever_used, top_k, len(retrieved or []), None),
             }
         )
 
