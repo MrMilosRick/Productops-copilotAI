@@ -42,7 +42,9 @@ def claude_rag_answer(question: str, retrieved: list,
             "Return ONLY one of these three values: Yes, No, or null. "
             "null means the answer cannot be determined from context. "
             "Do not add any explanation or other text. "
-            "Your entire response must be exactly one word: Yes, No, or null."
+            "Your entire response must be exactly one word: Yes, No, or null. "
+            "Your ENTIRE response must be a single word: Yes, No, or null. "
+            "Do not write any sentence. Do not explain. Just one word."
         )
     elif answer_type == "number":
         system = (
@@ -64,7 +66,9 @@ def claude_rag_answer(question: str, retrieved: list,
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
             "Return ONLY a comma-separated list of names. No explanation, no markdown, no preamble. "
-            "If the answer cannot be determined from context, return exactly: null"
+            "If the answer cannot be determined from context, return exactly: null. "
+            "Do not write any sentence or explanation. "
+            "Just the name(s) separated by commas. Nothing else."
         )
     elif answer_type == "date":
         system = (
