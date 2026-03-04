@@ -48,30 +48,39 @@ def claude_rag_answer(question: str, retrieved: list,
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
-            "Return ONLY the number (e.g. '5', '30', '2018'). No units, no explanation. "
-            "If the answer cannot be determined from context, return null."
+            "Return ONLY the number as a digit (e.g. '5', '30', '2018'). "
+            "No units, no explanation, no markdown, no preamble. "
+            "If the answer cannot be determined from context, return exactly: null"
         )
-    elif answer_type in ("name", "names"):
+    elif answer_type == "name":
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
-            "Return ONLY the name or comma-separated list of names. "
-            "If the answer cannot be determined from context, return null."
+            "Return ONLY the name. No explanation, no markdown, no preamble. "
+            "If the answer cannot be determined from context, return exactly: null"
+        )
+    elif answer_type == "names":
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context. "
+            "Return ONLY a comma-separated list of names. No explanation, no markdown, no preamble. "
+            "If the answer cannot be determined from context, return exactly: null"
         )
     elif answer_type == "date":
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
             "Return ONLY the date in format DD Month YYYY (e.g. '15 March 2024'). "
-            "If the answer cannot be determined from context, return null."
+            "No explanation, no markdown, no preamble. "
+            "If the answer cannot be determined from context, return exactly: null"
         )
     else:  # free_text
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context snippets. "
-            "Be concise and accurate. "
-            "If the information is not in the context, respond: "
-            "'There is no information on this question'."
+            "Be concise and accurate. No markdown formatting. Plain text only. "
+            "If the information is not in the context, respond with exactly: "
+            "There is no information on this question"
         )
 
     user = f"Question: {question}\n\nContext:\n{context}"
@@ -106,6 +115,14 @@ def claude_rag_answer(question: str, retrieved: list,
                 "ttft_ms": 0, "input_tokens": 0, "output_tokens": 0}
 
     answer = "".join(answer_parts).strip()
+    # For free_text: if answer starts with the unanswerable phrase, truncate
+    if answer_type == "free_text":
+        unanswerable = "There is no information on this question"
+        if answer.startswith(unanswerable):
+            answer = unanswerable
+    # Normalize null string to None
+    if answer.lower().strip() in ("null", "none", "n/a", ""):
+        answer = None
     if ttft_ms is None:
         ttft_ms = round((time.time() - t0) * 1000)
 
