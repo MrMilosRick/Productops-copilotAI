@@ -1,5 +1,6 @@
 import hashlib
 import re
+import re as _re
 import time
 import uuid
 from typing import Optional
@@ -89,6 +90,20 @@ RU_TRIVIAL_TERMS = {
     "где",
     "когда",
     "делать",
+    "выбрать",
+    "выбор",
+    "подобрать",
+    "купить",
+    "нужно",
+    "надо",
+    "можно",
+    "лучше",
+    "какой",
+    "какие",
+    "правильно",
+    "сделать",
+    "улучшить",
+    "помоги",
 }
 
 
@@ -1267,6 +1282,43 @@ def ask(request):
                 "telemetry": _ask_telemetry(_lat_ms(), "summary", top_k, len(retrieved or []), None),
             })
 
+        _CASE_REF_RE = _re.compile(
+            r'\b(CFI|CA|ARB|SCT|TCD|ENF|DEC)\s*(\d{3}/\d{4})\b',
+            _re.IGNORECASE
+        )
+        # Detect case ref in question
+        from copilot.models import Document
+        case_ref_match = _CASE_REF_RE.search(question)
+        if case_ref_match and document_id is None:
+            case_ref = f"{case_ref_match.group(1).upper()} {case_ref_match.group(2)}"
+            doc = Document.objects.filter(
+                workspace=ws,
+                title__icontains=case_ref
+            ).first()
+            if doc:
+                document_id = doc.id
+
+        if document_id is None:
+            _LAW_NAME_RE = _re.compile(
+                r'((?:DIFC\s+)?(?:[A-Z][a-z]+\s+){1,5}Law(?:\s+(?:No\.?\s*)?\d+)?\s*(?:of\s+\d{4})?)',
+                _re.IGNORECASE
+            )
+            law_match = _LAW_NAME_RE.search(question)
+            if law_match:
+                law_phrase = law_match.group(1).strip()
+                # Extract key words (skip short/common words)
+                words = [w for w in law_phrase.split()
+                        if len(w) > 3 and w.lower() not in
+                        {'difc', 'law', 'the', 'and', 'for', 'with', 'no', 'of'}]
+                for word in words[:2]:  # use first 2 significant words
+                    found_doc = Document.objects.filter(
+                        workspace=ws,
+                        title__icontains=word
+                    ).first()
+                    if found_doc:
+                        document_id = found_doc.id
+                        break
+
         if retriever == "keyword":
             retrieved = keyword_retrieve(ws.id, question, top_k=top_k, document_id=document_id)
             retriever_used = "keyword"
@@ -1309,7 +1361,7 @@ def ask(request):
                 except Exception:
                     notice = "doc_fallback_empty"
 
-        V_THR = 0.55
+        V_THR = 0.45
         V_HARD = 0.70
         KW_THR = 4
         if retriever_used == "keyword":
@@ -1336,7 +1388,7 @@ def ask(request):
 
         # Hard gate: keep NO-DOC out of doc_rag, but don't over-prune borderline DOC queries.
         # "велосипед" had max_score≈0.52, so 0.55 still routes to general.
-        if max_score < 0.55 and not doc_meta_intent:
+        if max_score < 0.45 and not doc_meta_intent:
             relevant = False
         # IMPORTANT: document_id does NOT automatically grant doc_rag.
         # Invariant (CI smoke is source of truth):
