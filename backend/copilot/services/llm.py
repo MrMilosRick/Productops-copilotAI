@@ -4,6 +4,120 @@ from typing import List, Dict, Any, Sequence, Optional
 
 from openai import OpenAI
 
+
+def claude_rag_answer(question: str, retrieved: list,
+                      answer_type: str = "free_text") -> dict:
+    """
+    Claude-based RAG answer with streaming for TTFT measurement.
+    Returns: {answer, llm_used, ttft_ms, input_tokens, output_tokens}
+    """
+    import anthropic
+    import os
+    import time
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return {"answer": "", "llm_used": "none", "ttft_ms": 0,
+                "input_tokens": 0, "output_tokens": 0}
+
+    # Select model by answer_type
+    if answer_type in ("boolean", "number", "name", "names", "date"):
+        model = "claude-haiku-4-5-20251001"
+    else:
+        model = "claude-sonnet-4-6"
+
+    # Build context
+    ctx_lines = []
+    for i, r in enumerate(retrieved[:15], start=1):
+        title = (r or {}).get("document_title", "")
+        text = ((r or {}).get("text") or (r or {}).get("snippet") or "")[:2000]
+        ctx_lines.append(f"[{i}] {title}\n{text}")
+    context = "\n\n".join(ctx_lines)
+
+    # Build system prompt by answer_type
+    if answer_type == "boolean":
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context. "
+            "Return ONLY one of these three values: Yes, No, or null. "
+            "null means the answer cannot be determined from context. "
+            "Do not add any explanation or other text. "
+            "Your entire response must be exactly one word: Yes, No, or null."
+        )
+    elif answer_type == "number":
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context. "
+            "Return ONLY the number (e.g. '5', '30', '2018'). No units, no explanation. "
+            "If the answer cannot be determined from context, return null."
+        )
+    elif answer_type in ("name", "names"):
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context. "
+            "Return ONLY the name or comma-separated list of names. "
+            "If the answer cannot be determined from context, return null."
+        )
+    elif answer_type == "date":
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context. "
+            "Return ONLY the date in format DD Month YYYY (e.g. '15 March 2024'). "
+            "If the answer cannot be determined from context, return null."
+        )
+    else:  # free_text
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context snippets. "
+            "Be concise and accurate. "
+            "If the information is not in the context, respond: "
+            "'There is no information on this question'."
+        )
+
+    user = f"Question: {question}\n\nContext:\n{context}"
+
+    client_a = anthropic.Anthropic(api_key=api_key)
+
+    t0 = time.time()
+    ttft_ms = None
+    answer_parts = []
+    input_tokens = 0
+    output_tokens = 0
+
+    try:
+        with client_a.messages.stream(
+            model=model,
+            max_tokens=300,
+            system=system,
+            messages=[{"role": "user", "content": user}]
+        ) as stream:
+            for text in stream.text_stream:
+                if ttft_ms is None:
+                    ttft_ms = round((time.time() - t0) * 1000)
+                answer_parts.append(text)
+
+            # Get usage from final message
+            final_msg = stream.get_final_message()
+            input_tokens = final_msg.usage.input_tokens
+            output_tokens = final_msg.usage.output_tokens
+
+    except Exception as e:
+        return {"answer": str(e), "llm_used": "error",
+                "ttft_ms": 0, "input_tokens": 0, "output_tokens": 0}
+
+    answer = "".join(answer_parts).strip()
+    if ttft_ms is None:
+        ttft_ms = round((time.time() - t0) * 1000)
+
+    return {
+        "answer": answer,
+        "llm_used": model,
+        "ttft_ms": ttft_ms,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+    }
+
+
 CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 
 

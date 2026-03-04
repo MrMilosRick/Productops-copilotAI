@@ -26,6 +26,7 @@ from copilot.services.vector_retriever import vector_retrieve
 from copilot.services.hybrid_retriever import hybrid_retrieve
 from copilot.services.idempotency import normalize_idempotency_key
 from copilot.services.llm import (
+    claude_rag_answer,
     rag_answer_openai,
     general_answer_openai,
     repair_fallback_openai,
@@ -1682,6 +1683,37 @@ def ask(request):
             output_json={"results": sanitize_sources(retrieved), "retriever_used": retriever_used, "route": "doc_rag", "notice": "", "debug": debug_payload},
             status="ok",
         )
+
+        # Use Claude if ANTHROPIC_API_KEY is set
+        import os
+        if os.getenv("ANTHROPIC_API_KEY") and retrieved:
+            answer_type = (request.data.get("answer_type", "free_text") if isinstance(request.data, dict) else "free_text")
+            claude_result = claude_rag_answer(
+                question=question,
+                retrieved=retrieved,
+                answer_type=answer_type,
+            )
+            if claude_result.get("answer"):
+                return Response({
+                    "run_id": run.id,
+                    "answer": claude_result["answer"],
+                    "sources": retrieved[:15],
+                    "retriever_used": retriever_used,
+                    "llm_used": claude_result["llm_used"],
+                    "answer_mode": "claude_rag",
+                    "route": "doc_rag",
+                    "retrieved_chunk_ids": [
+                        c.get("chunk_uid") for c in retrieved
+                        if c.get("chunk_uid")
+                    ],
+                    "telemetry": {
+                        "ttft_ms": claude_result["ttft_ms"],
+                        "input_tokens": claude_result["input_tokens"],
+                        "output_tokens": claude_result["output_tokens"],
+                        "retriever_used": retriever_used,
+                        "n_retrieved": len(retrieved),
+                    }
+                })
 
         run.status = "success"
         if answer_mode == "sources_only":
