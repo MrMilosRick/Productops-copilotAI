@@ -1337,6 +1337,18 @@ def ask(request):
             retrieved = hybrid_retrieve(ws.id, question, top_k=top_k, document_id=document_id)
             retriever_used = "hybrid"
 
+        # Global fallback: search across ALL documents (no document_id filter)
+        if not retrieved:
+            from copilot.services.hybrid_retriever import hybrid_retrieve as _hybrid_retrieve_fallback
+            retrieved = _hybrid_retrieve_fallback(
+                ws.id,
+                question,
+                top_k=15,
+                document_id=None,
+            )
+            if retrieved:
+                retriever_used = "global_fallback"
+
         if document_id is not None and not retrieved:
             chunks_qs = EmbeddingChunk.objects.filter(document_id=document_id).select_related("document").order_by("chunk_index")[:top_k]
             chunks = list(chunks_qs)
@@ -1414,6 +1426,48 @@ def ask(request):
             "document_id": document_id,
             "top_k": top_k,
         }
+
+        # ── Claude intercept (runs for every request) ──────────────────
+        import os as _os
+        if _os.getenv("ANTHROPIC_API_KEY"):
+            _at = (request.data.get("answer_type", "free_text")
+                   if isinstance(request.data, dict) else "free_text")
+            _cr = claude_rag_answer(
+                question=question,
+                retrieved=retrieved if retrieved else [],
+                answer_type=_at,
+            )
+            if _cr.get("llm_used") not in (None, "none", "error"):
+                return Response({
+                    "run_id": run.id,
+                    "answer": _cr["answer"],
+                    "sources": sanitize_sources(retrieved[:15]) if retrieved else [],
+                    "retriever_used": retriever_used,
+                    "llm_used": _cr["llm_used"],
+                    "answer_mode": "claude_rag",
+                    "route": "doc_rag" if retrieved else "general",
+                    "notice": "",
+                    "debug": debug_payload,
+                    "retrieved_chunk_ids": [
+                        (retrieved or [])[i].get("chunk_uid")
+                        for i in _cr.get("used_indices", [])
+                        if i < len(retrieved or []) and (retrieved or [])[i].get("chunk_uid")
+                    ] or [
+                        c.get("chunk_uid") for c in (retrieved or [])[:5]
+                        if c.get("chunk_uid")
+                    ],
+                    "telemetry": {
+                        "ttft_ms": _cr["ttft_ms"],
+                        "total_time_ms": _cr["total_time_ms"],
+                        "time_per_output_token_ms": _cr["time_per_output_token_ms"],
+                        "input_tokens": _cr["input_tokens"],
+                        "output_tokens": _cr["output_tokens"],
+                        "model": _cr["llm_used"],
+                        "retriever_used": retriever_used,
+                        "n_retrieved": len(retrieved or []),
+                    }
+                })
+        # ── end Claude intercept ────────────────────────────────────────
 
         if answer_mode == "sources_only":
             AgentStep.objects.create(
@@ -1686,7 +1740,7 @@ def ask(request):
 
         # Use Claude if ANTHROPIC_API_KEY is set
         import os
-        if os.getenv("ANTHROPIC_API_KEY") and retrieved:
+        if os.getenv("ANTHROPIC_API_KEY"):
             answer_type = (request.data.get("answer_type", "free_text") if isinstance(request.data, dict) else "free_text")
             claude_result = claude_rag_answer(
                 question=question,

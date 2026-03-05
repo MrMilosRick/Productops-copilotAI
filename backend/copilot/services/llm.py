@@ -6,10 +6,11 @@ from openai import OpenAI
 
 
 def claude_rag_answer(question: str, retrieved: list,
-                      answer_type: str = "free_text") -> dict:
+                      answer_type: str = "free_text",
+                      used_indices_only: bool = True) -> dict:
     """
     Claude-based RAG answer with streaming for TTFT measurement.
-    Returns: {answer, llm_used, ttft_ms, input_tokens, output_tokens}
+    Returns: {answer, llm_used, ttft_ms, input_tokens, output_tokens, used_indices}
     """
     import anthropic
     import os
@@ -18,7 +19,15 @@ def claude_rag_answer(question: str, retrieved: list,
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
         return {"answer": "", "llm_used": "none", "ttft_ms": 0,
-                "input_tokens": 0, "output_tokens": 0}
+                "input_tokens": 0, "output_tokens": 0, "used_indices": [],
+                "total_time_ms": 0, "time_per_output_token_ms": 0}
+
+    _sources_instruction = (
+        "\nAfter your answer, on a new line write: SOURCES: "
+        "followed by comma-separated 1-based indices of context snippets "
+        "you actually used (e.g. SOURCES: 1,3,5). "
+        "If you used no sources write: SOURCES: none"
+    )
 
     # Select model by answer_type
     if answer_type in ("boolean", "number", "name", "names", "date"):
@@ -45,6 +54,7 @@ def claude_rag_answer(question: str, retrieved: list,
             "Your entire response must be exactly one word: Yes, No, or null. "
             "Your ENTIRE response must be a single word: Yes, No, or null. "
             "Do not write any sentence. Do not explain. Just one word."
+            + (_sources_instruction if used_indices_only else "")
         )
     elif answer_type == "number":
         system = (
@@ -53,6 +63,7 @@ def claude_rag_answer(question: str, retrieved: list,
             "Return ONLY the number as a digit (e.g. '5', '30', '2018'). "
             "No units, no explanation, no markdown, no preamble. "
             "If the answer cannot be determined from context, return exactly: null"
+            + (_sources_instruction if used_indices_only else "")
         )
     elif answer_type == "name":
         system = (
@@ -60,6 +71,7 @@ def claude_rag_answer(question: str, retrieved: list,
             "Answer ONLY using the provided context. "
             "Return ONLY the name. No explanation, no markdown, no preamble. "
             "If the answer cannot be determined from context, return exactly: null"
+            + (_sources_instruction if used_indices_only else "")
         )
     elif answer_type == "names":
         system = (
@@ -69,6 +81,7 @@ def claude_rag_answer(question: str, retrieved: list,
             "If the answer cannot be determined from context, return exactly: null. "
             "Do not write any sentence or explanation. "
             "Just the name(s) separated by commas. Nothing else."
+            + (_sources_instruction if used_indices_only else "")
         )
     elif answer_type == "date":
         system = (
@@ -77,6 +90,7 @@ def claude_rag_answer(question: str, retrieved: list,
             "Return ONLY the date in format DD Month YYYY (e.g. '15 March 2024'). "
             "No explanation, no markdown, no preamble. "
             "If the answer cannot be determined from context, return exactly: null"
+            + (_sources_instruction if used_indices_only else "")
         )
     else:  # free_text
         system = (
@@ -85,6 +99,7 @@ def claude_rag_answer(question: str, retrieved: list,
             "Be concise and accurate. No markdown formatting. Plain text only. "
             "If the information is not in the context, respond with exactly: "
             "There is no information on this question"
+            + (_sources_instruction if used_indices_only else "")
         )
 
     user = f"Question: {question}\n\nContext:\n{context}"
@@ -92,6 +107,7 @@ def claude_rag_answer(question: str, retrieved: list,
     client_a = anthropic.Anthropic(api_key=api_key)
 
     t0 = time.time()
+    t_end = None
     ttft_ms = None
     answer_parts = []
     input_tokens = 0
@@ -113,12 +129,32 @@ def claude_rag_answer(question: str, retrieved: list,
             final_msg = stream.get_final_message()
             input_tokens = final_msg.usage.input_tokens
             output_tokens = final_msg.usage.output_tokens
+            t_end = time.time()
+            total_time_ms = round((t_end - t0) * 1000)
+            if ttft_ms and output_tokens > 1:
+                time_per_output_token_ms = round(
+                    (t_end - (t0 + ttft_ms / 1000)) / (output_tokens - 1) * 1000, 2
+                )
+            else:
+                time_per_output_token_ms = round(total_time_ms / max(output_tokens, 1), 2)
 
     except Exception as e:
         return {"answer": str(e), "llm_used": "error",
-                "ttft_ms": 0, "input_tokens": 0, "output_tokens": 0}
+                "ttft_ms": 0, "input_tokens": 0, "output_tokens": 0, "used_indices": [],
+                "total_time_ms": 0, "time_per_output_token_ms": 0}
 
     answer = "".join(answer_parts).strip()
+    # Extract used source indices
+    used_indices = []
+    if "SOURCES:" in answer:
+        parts = answer.rsplit("SOURCES:", 1)
+        answer = parts[0].strip()
+        src_part = parts[1].strip()
+        if src_part.lower() != "none":
+            for s in src_part.split(","):
+                s = s.strip()
+                if s.isdigit():
+                    used_indices.append(int(s) - 1)  # convert to 0-based index
     # For free_text: if answer starts with the unanswerable phrase, truncate
     if answer_type == "free_text":
         unanswerable = "There is no information on this question"
@@ -136,6 +172,9 @@ def claude_rag_answer(question: str, retrieved: list,
         "ttft_ms": ttft_ms,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
+        "used_indices": used_indices,
+        "total_time_ms": total_time_ms,
+        "time_per_output_token_ms": time_per_output_token_ms,
     }
 
 
