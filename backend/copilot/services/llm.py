@@ -48,21 +48,20 @@ def claude_rag_answer(question: str, retrieved: list,
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
-            "Return ONLY one of these three values: Yes, No, or null. "
-            "null means the answer cannot be determined from context. "
-            "Do not add any explanation or other text. "
-            "Your entire response must be exactly one word: Yes, No, or null. "
+            "Return ONLY the word Yes or No. "
+            "If the answer is not in the context, return null. "
             "Your ENTIRE response must be a single word: Yes, No, or null. "
-            "Do not write any sentence. Do not explain. Just one word."
+            "No explanation. No punctuation. No other text."
             + (_sources_instruction if used_indices_only else "")
         )
     elif answer_type == "number":
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
-            "Return ONLY the number as a digit (e.g. '5', '30', '2018'). "
-            "No units, no explanation, no markdown, no preamble. "
-            "If the answer cannot be determined from context, return exactly: null"
+            "Return ONLY the number as a digit. "
+            "If the answer is not in the context, return null. "
+            "Your ENTIRE response must be a single number or null. "
+            "No explanation. No units. No other text."
             + (_sources_instruction if used_indices_only else "")
         )
     elif answer_type == "name":

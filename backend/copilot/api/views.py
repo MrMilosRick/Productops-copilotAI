@@ -1438,6 +1438,23 @@ def ask(request):
                 answer_type=_at,
             )
             if _cr.get("llm_used") not in (None, "none", "error"):
+                _chunk_ids = [
+                    (retrieved or [])[i].get("chunk_uid")
+                    for i in _cr.get("used_indices", [])
+                    if i < len(retrieved or []) and (retrieved or [])[i].get("chunk_uid")
+                ] or [
+                    c.get("chunk_uid") for c in (retrieved or [])[:5]
+                    if c.get("chunk_uid")
+                ]
+                # Unanswerable = empty chunk_ids
+                _answer = _cr.get("answer")
+                _is_unanswerable = (
+                    _answer is None or
+                    (isinstance(_answer, str) and
+                     "there is no information" in _answer.lower())
+                )
+                if _is_unanswerable:
+                    _chunk_ids = []
                 return Response({
                     "run_id": run.id,
                     "answer": _cr["answer"],
@@ -1448,14 +1465,7 @@ def ask(request):
                     "route": "doc_rag" if retrieved else "general",
                     "notice": "",
                     "debug": debug_payload,
-                    "retrieved_chunk_ids": [
-                        (retrieved or [])[i].get("chunk_uid")
-                        for i in _cr.get("used_indices", [])
-                        if i < len(retrieved or []) and (retrieved or [])[i].get("chunk_uid")
-                    ] or [
-                        c.get("chunk_uid") for c in (retrieved or [])[:5]
-                        if c.get("chunk_uid")
-                    ],
+                    "retrieved_chunk_ids": _chunk_ids,
                     "telemetry": {
                         "ttft_ms": _cr["ttft_ms"],
                         "total_time_ms": _cr["total_time_ms"],
