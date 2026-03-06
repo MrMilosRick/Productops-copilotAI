@@ -163,6 +163,15 @@ def claude_rag_answer(question: str, retrieved: list,
     # Normalize null string to None
     if answer.lower().strip() in ("null", "none", "n/a", ""):
         answer = None
+    # Convert number answers to int
+    if answer_type == "number" and answer is not None:
+        try:
+            answer = int(str(answer).strip())
+        except (ValueError, TypeError):
+            try:
+                answer = float(str(answer).strip())
+            except (ValueError, TypeError):
+                pass
     if ttft_ms is None:
         ttft_ms = round((time.time() - t0) * 1000)
 
