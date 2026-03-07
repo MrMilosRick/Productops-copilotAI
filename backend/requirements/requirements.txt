@@ -22,3 +22,4 @@ pypdf>=5.0.0
 python-docx>=1.1.0
 pdfminer.six==20231228
 anthropic
+pymupdf>=1.23.0
