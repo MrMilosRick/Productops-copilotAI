@@ -4,7 +4,6 @@ services:
     environment:
       POSTGRES_DB: copilot
       POSTGRES_USER: copilot
-      POSTGRES_PASSWORD: copilot
     volumes:
       - copilot_pgdata:/var/lib/postgresql/data
     restart: unless-stopped
@@ -44,7 +43,7 @@ services:
       bash -lc "
       echo 'Waiting for DB...' &&
       for i in {1..60}; do
-        python -c \"import os, psycopg; host=os.getenv('POSTGRES_HOST','db'); port=int(os.getenv('POSTGRES_PORT','5432')); db=os.getenv('POSTGRES_DB','copilot'); user=os.getenv('POSTGRES_USER','copilot'); pw=os.getenv('POSTGRES_PASSWORD','copilot'); psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw, connect_timeout=2).close(); print('DB ready')\" && break || true
+        python -c \"import os, psycopg; host=os.getenv('POSTGRES_HOST','db'); port=int(os.getenv('POSTGRES_PORT','5432')); db=os.getenv('POSTGRES_DB','copilot'); user=os.getenv('POSTGRES_USER','copilot'); pw=os.environ['POSTGRES_PASSWORD']; psycopg.connect(host=host, port=port, dbname=db, user=user, password=pw, connect_timeout=2).close(); print('DB ready')\" && break || true
         echo '...still waiting' && sleep 1
       done &&
       python manage.py migrate &&

@@ -1,5 +1,7 @@
 import hashlib
 import re
+import re as _re
+import time
 import uuid
 from typing import Optional
 
@@ -24,6 +26,7 @@ from copilot.services.vector_retriever import vector_retrieve
 from copilot.services.hybrid_retriever import hybrid_retrieve
 from copilot.services.idempotency import normalize_idempotency_key
 from copilot.services.llm import (
+    claude_rag_answer,
     rag_answer_openai,
     general_answer_openai,
     repair_fallback_openai,
@@ -88,6 +91,20 @@ RU_TRIVIAL_TERMS = {
     "где",
     "когда",
     "делать",
+    "выбрать",
+    "выбор",
+    "подобрать",
+    "купить",
+    "нужно",
+    "надо",
+    "можно",
+    "лучше",
+    "какой",
+    "какие",
+    "правильно",
+    "сделать",
+    "улучшить",
+    "помоги",
 }
 
 
@@ -100,7 +117,39 @@ def _is_authorish_question(question: str) -> bool:
     return any(k in q for k in (ru + en))
 
 
-def _has_nontrivial_kw_terms(retrieved: list) -> bool:
+def _detect_ru(text: str) -> bool:
+    """True if text contains Cyrillic."""
+    return bool(re.search(r"[А-Яа-яЁё]", text or ""))
+
+
+def _ru_stem(word: str) -> str:
+    """Minimal stem for RU keyword evidence: lowercase prefix."""
+    w = (word or "").strip().lower()
+    if len(w) < 3:
+        return w
+    return w[:5] if len(w) >= 4 else w
+
+
+def _question_kw_evidence(question: str, retrieved: list) -> bool:
+    """True if >=2 distinct question stems appear in retrieved snippet/text (RU fallback)."""
+    words = re.findall(r"[а-яёa-z]{3,}", (question or "").lower())
+    stems = set()
+    for w in words:
+        if w in RU_TRIVIAL_TERMS:
+            continue
+        stems.add(_ru_stem(w))
+    if len(stems) < 2:
+        return False
+    hits = set()
+    for r in (retrieved or []):
+        text = (r.get("snippet") or r.get("text") or "").lower()
+        for st in stems:
+            if st in text:
+                hits.add(st)
+    return len(hits) >= 2
+
+
+def _has_nontrivial_kw_terms(retrieved: list, question: str = "") -> bool:
     for r in (retrieved or []):
         terms = (r or {}).get("matched_terms") or []
         for t in terms:
@@ -110,6 +159,8 @@ def _has_nontrivial_kw_terms(retrieved: list) -> bool:
             if tt in RU_TRIVIAL_TERMS:
                 continue
             return True
+    if question and _detect_ru(question):
+        return _question_kw_evidence(question, retrieved)
     return False
 
 
@@ -494,6 +545,79 @@ def sanitize_sources(items):
     for d in out:
         d.pop("text", None)
     return out
+
+
+def _retrieved_chunk_uids(retrieved_items):
+    """Map retrieved dicts to chunk_uid list (batch). Prefer chunk_uid; else chunk_id/id; else (document_id, chunk_index)."""
+    if not retrieved_items:
+        return []
+    out = []
+    pks = []
+    pairs = []
+    for r in (retrieved_items or []):
+        if not isinstance(r, dict):
+            out.append(None)
+            continue
+        if r.get("chunk_uid"):
+            out.append(r.get("chunk_uid"))
+            continue
+        pk = r.get("chunk_id") or r.get("id")
+        if pk is not None:
+            try:
+                pks.append(int(pk))
+            except (TypeError, ValueError):
+                pks.append(None)
+            out.append(("pk", len(pks) - 1))
+            continue
+        doc_id = r.get("document_id")
+        ch_idx = r.get("chunk_index")
+        if doc_id is not None and ch_idx is not None:
+            try:
+                pairs.append((int(doc_id), int(ch_idx)))
+            except (TypeError, ValueError):
+                out.append(None)
+                continue
+            out.append(("pair", len(pairs) - 1))
+            continue
+        out.append(None)
+    pk_to_uid = {}
+    if pks:
+        valid_pks = [x for x in pks if x is not None]
+        if valid_pks:
+            for pk, uid in EmbeddingChunk.objects.filter(pk__in=valid_pks).values_list("pk", "chunk_uid"):
+                pk_to_uid[pk] = uid or None
+    pair_to_uid = {}
+    if pairs:
+        seen_docs = {p[0] for p in pairs}
+        for doc_id in seen_docs:
+            indices = [p[1] for p in pairs if p[0] == doc_id]
+            for idx, uid in EmbeddingChunk.objects.filter(document_id=doc_id, chunk_index__in=indices).values_list("chunk_index", "chunk_uid"):
+                pair_to_uid[(doc_id, idx)] = uid or None
+    result = []
+    for x in out:
+        if x is None:
+            result.append(None)
+        elif isinstance(x, str) and x:
+            result.append(x)
+        elif isinstance(x, tuple) and x[0] == "pk":
+            result.append(pk_to_uid.get(pks[x[1]]))
+        elif isinstance(x, tuple) and x[0] == "pair":
+            result.append(pair_to_uid.get(pairs[x[1]]))
+        else:
+            result.append(None)
+    return [u for u in result if u]
+
+
+def _ask_telemetry(latency_ms_total, retriever_used, top_k, n_retrieved, token_usage=None):
+    return {
+        "latency_ms_total": latency_ms_total,
+        "ttft_ms": latency_ms_total,
+        "ttft_mode": "non_streaming_estimate",
+        "token_usage": token_usage,
+        "retriever_used": retriever_used or "",
+        "top_k": top_k,
+        "n_retrieved": n_retrieved,
+    }
 
 
 def _add_out_of_doc_notice(notice: str, document_id: Optional[int]) -> str:
@@ -898,6 +1022,11 @@ def normalize_source(r: dict) -> dict:
 
 @api_view(["POST"])
 def ask(request):
+    t0 = time.perf_counter()
+
+    def _lat_ms():
+        return int((time.perf_counter() - t0) * 1000)
+
     ser = AskSerializer(data=request.data)
     try:
         ser.is_valid(raise_exception=True)
@@ -1034,6 +1163,7 @@ def ask(request):
                 else:
                     answer_replay = _strip_noise_sections(run.final_output or "")
                     sources_replay = sanitize_sources(sources)
+                retrieved_for_ids = (step.output_json or {}).get("results", []) if step else sources_replay
                 resp = {
                     "run_id": run.id,
                     "answer": answer_replay,
@@ -1044,6 +1174,8 @@ def ask(request):
                     "route": route_replay,
                     "notice": notice_replay,
                     "idempotent_replay": True,
+                    "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved_for_ids),
+                    "telemetry": _ask_telemetry(_lat_ms(), retriever_used, step_in.get("top_k"), len(sources_replay or []), None),
                 }
                 return Response(resp)
 # 2) Create run (new execution)
@@ -1066,6 +1198,7 @@ def ask(request):
         )
 
     try:
+        notice = ""
         retrieved = []
         retriever_used = "keyword"
         llm_used = "none"
@@ -1090,6 +1223,8 @@ def ask(request):
                     "answer_mode": answer_mode,
                     "route": "summary",
                     "notice": "",
+                    "retrieved_chunk_ids": [],
+                    "telemetry": _ask_telemetry(_lat_ms(), "summary", top_k, 0, None),
                 })
             n = len(chunks)
             if n <= 12:
@@ -1144,7 +1279,46 @@ def ask(request):
                 "answer_mode": answer_mode,
                 "route": "summary",
                 "notice": "",
+                "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved),
+                "telemetry": _ask_telemetry(_lat_ms(), "summary", top_k, len(retrieved or []), None),
             })
+
+        _CASE_REF_RE = _re.compile(
+            r'\b(CFI|CA|ARB|SCT|TCD|ENF|DEC)\s*(\d{3}/\d{4})\b',
+            _re.IGNORECASE
+        )
+        # Detect case ref in question
+        from copilot.models import Document
+        case_ref_match = _CASE_REF_RE.search(question)
+        if case_ref_match and document_id is None:
+            case_ref = f"{case_ref_match.group(1).upper()} {case_ref_match.group(2)}"
+            doc = Document.objects.filter(
+                workspace=ws,
+                title__icontains=case_ref
+            ).first()
+            if doc:
+                document_id = doc.id
+
+        if document_id is None:
+            _LAW_NAME_RE = _re.compile(
+                r'((?:DIFC\s+)?(?:[A-Z][a-z]+\s+){1,5}Law(?:\s+(?:No\.?\s*)?\d+)?\s*(?:of\s+\d{4})?)',
+                _re.IGNORECASE
+            )
+            law_match = _LAW_NAME_RE.search(question)
+            if law_match:
+                law_phrase = law_match.group(1).strip()
+                # Extract key words (skip short/common words)
+                words = [w for w in law_phrase.split()
+                        if len(w) > 3 and w.lower() not in
+                        {'difc', 'law', 'the', 'and', 'for', 'with', 'no', 'of'}]
+                for word in words[:2]:  # use first 2 significant words
+                    found_doc = Document.objects.filter(
+                        workspace=ws,
+                        title__icontains=word
+                    ).first()
+                    if found_doc:
+                        document_id = found_doc.id
+                        break
 
         if retriever == "keyword":
             retrieved = keyword_retrieve(ws.id, question, top_k=top_k, document_id=document_id)
@@ -1162,6 +1336,18 @@ def ask(request):
         else:  # auto -> hybrid (default)
             retrieved = hybrid_retrieve(ws.id, question, top_k=top_k, document_id=document_id)
             retriever_used = "hybrid"
+
+        # Global fallback: search across ALL documents (no document_id filter)
+        if not retrieved:
+            from copilot.services.hybrid_retriever import hybrid_retrieve as _hybrid_retrieve_fallback
+            retrieved = _hybrid_retrieve_fallback(
+                ws.id,
+                question,
+                top_k=15,
+                document_id=None,
+            )
+            if retrieved:
+                retriever_used = "global_fallback"
 
         if document_id is not None and not retrieved:
             chunks_qs = EmbeddingChunk.objects.filter(document_id=document_id).select_related("document").order_by("chunk_index")[:top_k]
@@ -1188,7 +1374,7 @@ def ask(request):
                 except Exception:
                     notice = "doc_fallback_empty"
 
-        V_THR = 0.55
+        V_THR = 0.45
         V_HARD = 0.70
         KW_THR = 4
         if retriever_used == "keyword":
@@ -1197,7 +1383,7 @@ def ask(request):
             best_kw = max((float(r.get("keyword_score") or 0) for r in retrieved), default=0)
         best_vec = max((float(r.get("vector_score") or 0) for r in retrieved), default=0)
         # Keyword evidence must be non-trivial (avoid false hits like "есть")
-        kw_evidence = _has_nontrivial_kw_terms(retrieved)
+        kw_evidence = _has_nontrivial_kw_terms(retrieved, question)
         has_kw_hit = bool(kw_evidence)
 
         # Soft first-person intro should only help for author/identity questions, not arbitrary ones
@@ -1215,7 +1401,7 @@ def ask(request):
 
         # Hard gate: keep NO-DOC out of doc_rag, but don't over-prune borderline DOC queries.
         # "велосипед" had max_score≈0.52, so 0.55 still routes to general.
-        if max_score < 0.55 and not doc_meta_intent:
+        if max_score < 0.45 and not doc_meta_intent:
             relevant = False
         # IMPORTANT: document_id does NOT automatically grant doc_rag.
         # Invariant (CI smoke is source of truth):
@@ -1241,6 +1427,58 @@ def ask(request):
             "top_k": top_k,
         }
 
+        # ── Claude intercept (runs for every request) ──────────────────
+        import os as _os
+        if _os.getenv("ANTHROPIC_API_KEY"):
+            _at = (request.data.get("answer_type", "free_text")
+                   if isinstance(request.data, dict) else "free_text")
+            _cr = claude_rag_answer(
+                question=question,
+                retrieved=retrieved if retrieved else [],
+                answer_type=_at,
+            )
+            if _cr.get("llm_used") not in (None, "none", "error"):
+                _chunk_ids = [
+                    (retrieved or [])[i].get("chunk_uid")
+                    for i in _cr.get("used_indices", [])
+                    if i < len(retrieved or []) and (retrieved or [])[i].get("chunk_uid")
+                ] or [
+                    c.get("chunk_uid") for c in (retrieved or [])[:5]
+                    if c.get("chunk_uid")
+                ]
+                # Unanswerable = empty chunk_ids
+                _answer = _cr.get("answer")
+                _is_unanswerable = (
+                    _answer is None or
+                    (isinstance(_answer, str) and
+                     "there is no information" in _answer.lower())
+                )
+                if _is_unanswerable:
+                    _chunk_ids = []
+                return Response({
+                    "run_id": run.id,
+                    "answer": _cr["answer"],
+                    "sources": sanitize_sources(retrieved[:15]) if retrieved else [],
+                    "retriever_used": retriever_used,
+                    "llm_used": _cr["llm_used"],
+                    "answer_mode": "claude_rag",
+                    "route": "doc_rag" if retrieved else "general",
+                    "notice": "",
+                    "debug": debug_payload,
+                    "retrieved_chunk_ids": _chunk_ids,
+                    "telemetry": {
+                        "ttft_ms": _cr["ttft_ms"],
+                        "total_time_ms": _cr["total_time_ms"],
+                        "time_per_output_token_ms": _cr["time_per_output_token_ms"],
+                        "input_tokens": _cr["input_tokens"],
+                        "output_tokens": _cr["output_tokens"],
+                        "model": _cr["llm_used"],
+                        "retriever_used": retriever_used,
+                        "n_retrieved": len(retrieved or []),
+                    }
+                })
+        # ── end Claude intercept ────────────────────────────────────────
+
         if answer_mode == "sources_only":
             AgentStep.objects.create(
                 run=run,
@@ -1259,6 +1497,8 @@ def ask(request):
                 "route": "doc_rag",
                 "notice": "",
                 "debug": debug_payload,
+                "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved),
+                "telemetry": _ask_telemetry(_lat_ms(), retriever_used, top_k, len(retrieved or []), None),
             })
 
         if doc_title_intent and doc_title_value and retrieved:
@@ -1303,6 +1543,8 @@ def ask(request):
                 "route": "doc_rag",
                 "notice": "",
                 "debug": debug_payload,
+                "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved),
+                "telemetry": _ask_telemetry(_lat_ms(), retriever_used, top_k, len(retrieved or []), None),
             })
 
         if not retrieved:
@@ -1359,6 +1601,8 @@ def ask(request):
                     "route": "general",
                     "notice": notice,
                     "debug": debug_payload,
+                    "retrieved_chunk_ids": [],
+                    "telemetry": _ask_telemetry(_lat_ms(), "general", top_k, 0, None),
                 })
             # No retrieved context and no document selected -> general answer path (language-aware)
             notice = _add_out_of_doc_notice("", document_id)
@@ -1428,6 +1672,8 @@ def ask(request):
                 "route": "general",
                 "notice": notice,
                 "debug": debug_payload,
+                "retrieved_chunk_ids": [],
+                "telemetry": _ask_telemetry(_lat_ms(), "general", top_k, 0, None),
             })
 
         if not relevant:
@@ -1490,6 +1736,8 @@ def ask(request):
                 "route": "general",
                 "notice": notice,
                 "debug": debug_payload,
+                "retrieved_chunk_ids": [],
+                "telemetry": _ask_telemetry(_lat_ms(), "general", top_k, 0, None),
             })
 
         AgentStep.objects.create(
@@ -1499,6 +1747,37 @@ def ask(request):
             output_json={"results": sanitize_sources(retrieved), "retriever_used": retriever_used, "route": "doc_rag", "notice": "", "debug": debug_payload},
             status="ok",
         )
+
+        # Use Claude if ANTHROPIC_API_KEY is set
+        import os
+        if os.getenv("ANTHROPIC_API_KEY"):
+            answer_type = (request.data.get("answer_type", "free_text") if isinstance(request.data, dict) else "free_text")
+            claude_result = claude_rag_answer(
+                question=question,
+                retrieved=retrieved,
+                answer_type=answer_type,
+            )
+            if claude_result.get("answer"):
+                return Response({
+                    "run_id": run.id,
+                    "answer": claude_result["answer"],
+                    "sources": retrieved[:15],
+                    "retriever_used": retriever_used,
+                    "llm_used": claude_result["llm_used"],
+                    "answer_mode": "claude_rag",
+                    "route": "doc_rag",
+                    "retrieved_chunk_ids": [
+                        c.get("chunk_uid") for c in retrieved
+                        if c.get("chunk_uid")
+                    ],
+                    "telemetry": {
+                        "ttft_ms": claude_result["ttft_ms"],
+                        "input_tokens": claude_result["input_tokens"],
+                        "output_tokens": claude_result["output_tokens"],
+                        "retriever_used": retriever_used,
+                        "n_retrieved": len(retrieved),
+                    }
+                })
 
         run.status = "success"
         if answer_mode == "sources_only":
@@ -1515,7 +1794,16 @@ def ask(request):
             run.status = "error"
             run.error = f"unknown answer_mode: {answer_mode}"
             run.save(update_fields=["status","error"])
-            return Response({"run_id": run.id, "error": run.error, "sources": sanitize_sources(retrieved), "retriever_used": retriever_used, "llm_used": "none", "answer_mode": answer_mode}, status=400)
+            return Response({
+                "run_id": run.id,
+                "error": run.error,
+                "sources": sanitize_sources(retrieved),
+                "retriever_used": retriever_used,
+                "llm_used": "none",
+                "answer_mode": answer_mode,
+                "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved),
+                "telemetry": _ask_telemetry(_lat_ms(), retriever_used, top_k, len(retrieved or []), None),
+            }, status=400)
         run.save(update_fields=["status", "final_output"])
 
 
@@ -1560,6 +1848,8 @@ def ask(request):
                 "route": "doc_rag",
                 "notice": "",
                 "debug": debug_payload,
+                "retrieved_chunk_ids": _retrieved_chunk_uids(retrieved),
+                "telemetry": _ask_telemetry(_lat_ms(), retriever_used, top_k, len(retrieved or []), None),
             }
         )
 
