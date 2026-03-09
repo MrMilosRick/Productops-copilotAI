@@ -48,9 +48,9 @@ def claude_rag_answer(question: str, retrieved: list,
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
-            "Return ONLY the word Yes or No. "
+            "Return ONLY true or false as a JSON boolean. "
             "If the answer is not in the context, return null. "
-            "Your ENTIRE response must be a single word: Yes, No, or null. "
+            "Your ENTIRE response must be exactly: true, false, or null. "
             "No explanation. No punctuation. No other text."
             + (_sources_instruction if used_indices_only else "")
         )
@@ -86,9 +86,12 @@ def claude_rag_answer(question: str, retrieved: list,
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
-            "Return ONLY the date in format DD Month YYYY (e.g. '15 March 2024'). "
-            "No explanation, no markdown, no preamble. "
-            "If the answer cannot be determined from context, return exactly: null"
+            "Return ONLY the date in ISO 8601 format: YYYY-MM-DD. "
+            "If only year and month known: YYYY-MM. "
+            "If only year known: YYYY. "
+            "If not in context, return null. "
+            "Your ENTIRE response must be a date string or null. "
+            "No explanation. No other text."
             + (_sources_instruction if used_indices_only else "")
         )
     else:  # free_text
@@ -162,6 +165,11 @@ def claude_rag_answer(question: str, retrieved: list,
     # Normalize null string to None
     if answer.lower().strip() in ("null", "none", "n/a", ""):
         answer = None
+    if answer_type == "boolean" and answer is not None:
+        if str(answer).strip().lower() == "true":
+            answer = True
+        elif str(answer).strip().lower() == "false":
+            answer = False
     # Convert number answers to int
     if answer_type == "number" and answer is not None:
         try:
