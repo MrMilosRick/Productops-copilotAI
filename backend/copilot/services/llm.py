@@ -76,10 +76,12 @@ def claude_rag_answer(question: str, retrieved: list,
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
-            "Return ONLY a comma-separated list of names. No explanation, no markdown, no preamble. "
-            "If the answer cannot be determined from context, return exactly: null. "
-            "Do not write any sentence or explanation. "
-            "Just the name(s) separated by commas. Nothing else."
+            "Return ALL names as a JSON array of strings. "
+            "List every name mentioned that answers the question. "
+            "Example: [\"John Smith\", \"Jane Doe\"] "
+            "If no names found in the context, return null. "
+            "Your ENTIRE response must be a JSON array of strings or null. "
+            "No explanation. No markdown. No other text."
             + (_sources_instruction if used_indices_only else "")
         )
     elif answer_type == "date":
@@ -165,6 +167,26 @@ def claude_rag_answer(question: str, retrieved: list,
     # Normalize null string to None
     if answer.lower().strip() in ("null", "none", "n/a", ""):
         answer = None
+    # Truncate free_text to 280 characters
+    if answer_type == "free_text" and isinstance(answer, str):
+        if len(answer) > 280:
+            answer = answer[:277] + "..."
+    # Parse names JSON array
+    if answer_type == "names" and answer is not None:
+        import re as _re
+        # Strip markdown code fences
+        _clean = _re.sub(r'```(?:json)?\s*', '', str(answer)).strip().rstrip('`').strip()
+        try:
+            import json as _json
+            _parsed = _json.loads(_clean)
+            if isinstance(_parsed, list):
+                answer = [str(x).strip() for x in _parsed if x]
+            else:
+                answer = None
+        except Exception:
+            # Try to extract quoted strings
+            _names = _re.findall(r'"([^"]+)"', _clean)
+            answer = _names if _names else None
     if answer_type == "boolean" and answer is not None:
         if str(answer).strip().lower() == "true":
             answer = True
