@@ -139,7 +139,7 @@ def _build_answer(question_id: str, body: dict) -> dict:
         "id": question_id,
         "answer": answer if answer is not None else None,
         "ttft": round(ttft_ms / 1000.0, 4) if ttft_ms is not None else None,
-        "time_per_output_token": round(time_per_token, 6) if time_per_token is not None else None,
+        "time_per_output_token": round(time_per_token / 1000.0, 6) if time_per_token is not None else None,
         "total_response_time": round(total_ms / 1000.0, 4) if total_ms is not None else None,
         "retrieved_chunk_ids": chunk_ids,
         "input_tokens": body.get("input_tokens") or telemetry.get("input_tokens"),
