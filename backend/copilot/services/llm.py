@@ -33,7 +33,7 @@ def claude_rag_answer(question: str, retrieved: list,
     if answer_type in ("boolean", "number", "name", "names", "date"):
         model = "claude-haiku-4-5-20251001"
     else:
-        model = "claude-sonnet-4-6"
+        model = "claude-haiku-4-5-20251001"
 
     # Build context
     ctx_lines = []
@@ -49,16 +49,18 @@ def claude_rag_answer(question: str, retrieved: list,
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
             "Return ONLY true or false as a JSON boolean. "
-            "If the answer is not in the context, return null. "
-            "Your ENTIRE response must be exactly: true, false, or null. "
-            "No explanation. No punctuation. No other text."
+            "If the answer cannot be determined from the context, return null. "
+            "CRITICAL: Your ENTIRE response must be EXACTLY one of: true, false, null. "
+            "Do NOT write any explanation, reasoning, or other text. "
+            "Do NOT start with 'I need', 'Looking at', or any other phrase. "
+            "Your response must be a single word only."
             + (_sources_instruction if used_indices_only else "")
         )
     elif answer_type == "number":
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
-            "Return ONLY the number as a digit. "
+            "Return ONLY the number (integer or decimal). "
             "If the answer is not in the context, return null. "
             "Your ENTIRE response must be a single number or null. "
             "No explanation. No units. No other text."
@@ -68,7 +70,9 @@ def claude_rag_answer(question: str, retrieved: list,
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context. "
-            "Return ONLY the name. No explanation, no markdown, no preamble. "
+            "Return ONLY the name as a plain string. "
+            "CRITICAL: Do NOT write any explanation, reasoning, or other text. "
+            "Do NOT start with 'I cannot', 'I need', 'Looking at', or any phrase. "
             "If the answer cannot be determined from context, return exactly: null"
             + (_sources_instruction if used_indices_only else "")
         )
@@ -100,9 +104,13 @@ def claude_rag_answer(question: str, retrieved: list,
         system = (
             "You are a legal RAG assistant for DIFC law documents. "
             "Answer ONLY using the provided context snippets. "
-            "Be concise and accurate. No markdown formatting. Plain text only. "
-            "If the information is not in the context, respond with exactly: "
-            "There is no information on this question"
+            "Be concise. Maximum 280 characters. No markdown. Plain text only. "
+            "CRITICAL: If the answer is not explicitly stated in the context, "
+            "you MUST respond with EXACTLY this phrase and nothing else: "
+            "There is no information on this question in the provided documents. "
+            "Do NOT explain why. Do NOT say 'the context does not contain'. "
+            "Do NOT say 'I cannot'. Just use the exact phrase above. "
+            "Do NOT cite source numbers like '[1]' or 'context [3]' in your answer."
             + (_sources_instruction if used_indices_only else "")
         )
 
@@ -161,7 +169,7 @@ def claude_rag_answer(question: str, retrieved: list,
                     used_indices.append(int(s) - 1)  # convert to 0-based index
     # For free_text: if answer starts with the unanswerable phrase, truncate
     if answer_type == "free_text":
-        unanswerable = "There is no information on this question"
+        unanswerable = "There is no information on this question in the provided documents."
         if answer.startswith(unanswerable):
             answer = unanswerable
     # Normalize null string to None
