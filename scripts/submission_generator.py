@@ -111,7 +111,7 @@ def main() -> int:
         entry = run_single_question(qid, question_text, answer_type, chunks, config=config)
         # Limit grounding pages (evidence sources) per answer for evaluation experiments
         retrieved_chunk_pages = list(entry.retrieved_chunk_ids)
-        retrieved_chunk_pages = retrieved_chunk_pages[:2]
+        retrieved_chunk_pages = retrieved_chunk_pages[:3]
         entry.retrieved_chunk_ids = retrieved_chunk_pages
         entry.telemetry.retrieved_chunks = list(retrieved_chunk_pages)
         payload.answers.append(entry)
