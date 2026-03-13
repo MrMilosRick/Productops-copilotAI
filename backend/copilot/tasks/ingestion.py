@@ -12,6 +12,15 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
+def normalize_text(t: str) -> str:
+    return " ".join((t or "").split()).strip().lower()
+
+
+def _chunk_uid(doc_id: int, content_hash: str, chunk_index: int, chunk_text: str) -> str:
+    inner = hashlib.sha256(normalize_text(chunk_text).encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{doc_id}|{content_hash}|{chunk_index}|{inner}".encode("utf-8")).hexdigest()
+
+
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 5})
 def process_document(self, document_id: int) -> dict:
     # DB-level lock: mark as chunking once. If someone else already chunking/chunked -> skip.
@@ -69,10 +78,12 @@ def process_document(self, document_id: int) -> dict:
             # Rebuild chunks deterministically
             EmbeddingChunk.objects.filter(document=doc).delete()
 
+            content_hash = doc.content_hash or sha256_text(doc.content or "")
             objs = [
                 EmbeddingChunk(
                     document=doc,
                     chunk_index=i,
+                    chunk_uid=_chunk_uid(doc.id, content_hash, i, c["text"]),
                     text=c["text"],
                     meta=c.get("meta", {}),
                 )

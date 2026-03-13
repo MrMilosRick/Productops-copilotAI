@@ -40,6 +40,7 @@ class Document(models.Model):
 class EmbeddingChunk(models.Model):
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="chunks")
     chunk_index = models.IntegerField()
+    chunk_uid = models.CharField(max_length=80, db_index=True, blank=True, default="")
     text = models.TextField()
     meta = models.JSONField(default=dict, blank=True)
     embedding = VectorField(dimensions=1536, null=True, blank=True)

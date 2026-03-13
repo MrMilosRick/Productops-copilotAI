@@ -4,6 +4,226 @@ from typing import List, Dict, Any, Sequence, Optional
 
 from openai import OpenAI
 
+
+def claude_rag_answer(question: str, retrieved: list,
+                      answer_type: str = "free_text",
+                      used_indices_only: bool = True) -> dict:
+    """
+    Claude-based RAG answer with streaming for TTFT measurement.
+    Returns: {answer, llm_used, ttft_ms, input_tokens, output_tokens, used_indices}
+    """
+    import anthropic
+    import os
+    import time
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return {"answer": "", "llm_used": "none", "ttft_ms": 0,
+                "input_tokens": 0, "output_tokens": 0, "used_indices": [],
+                "total_time_ms": 0, "time_per_output_token_ms": 0}
+
+    _sources_instruction = (
+        "\nAfter your answer, on a new line write: SOURCES: "
+        "followed by comma-separated 1-based indices of context snippets "
+        "you actually used (e.g. SOURCES: 1,3,5). "
+        "If you used no sources write: SOURCES: none"
+    )
+
+    # Select model by answer_type
+    if answer_type in ("boolean", "number", "name", "names", "date"):
+        model = "claude-haiku-4-5-20251001"
+    else:
+        model = "claude-haiku-4-5-20251001"
+
+    # Build context
+    ctx_lines = []
+    for i, r in enumerate(retrieved[:15], start=1):
+        title = (r or {}).get("document_title", "")
+        text = ((r or {}).get("text") or (r or {}).get("snippet") or "")[:2000]
+        ctx_lines.append(f"[{i}] {title}\n{text}")
+    context = "\n\n".join(ctx_lines)
+
+    # Build system prompt by answer_type
+    if answer_type == "boolean":
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context. "
+            "Return ONLY true or false as a JSON boolean. "
+            "If the answer cannot be determined from the context, return null. "
+            "CRITICAL: Your ENTIRE response must be EXACTLY one of: true, false, null. "
+            "Do NOT write any explanation, reasoning, or other text. "
+            "Do NOT start with 'I need', 'Looking at', or any other phrase. "
+            "Your response must be a single word only."
+            + (_sources_instruction if used_indices_only else "")
+        )
+    elif answer_type == "number":
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context. "
+            "Return ONLY the number (integer or decimal). "
+            "If the answer is not in the context, return null. "
+            "Your ENTIRE response must be a single number or null. "
+            "No explanation. No units. No other text."
+            + (_sources_instruction if used_indices_only else "")
+        )
+    elif answer_type == "name":
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context. "
+            "Return ONLY the name as a plain string. "
+            "CRITICAL: Do NOT write any explanation, reasoning, or other text. "
+            "Do NOT start with 'I cannot', 'I need', 'Looking at', or any phrase. "
+            "If the answer cannot be determined from context, return exactly: null"
+            + (_sources_instruction if used_indices_only else "")
+        )
+    elif answer_type == "names":
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context. "
+            "Return ALL names as a JSON array of strings. "
+            "List every name mentioned that answers the question. "
+            "Example: [\"John Smith\", \"Jane Doe\"] "
+            "If no names found in the context, return null. "
+            "Your ENTIRE response must be a JSON array of strings or null. "
+            "No explanation. No markdown. No other text."
+            + (_sources_instruction if used_indices_only else "")
+        )
+    elif answer_type == "date":
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context. "
+            "Return ONLY the date in ISO 8601 format: YYYY-MM-DD. "
+            "If only year and month known: YYYY-MM. "
+            "If only year known: YYYY. "
+            "If not in context, return null. "
+            "Your ENTIRE response must be a date string or null. "
+            "No explanation. No other text."
+            + (_sources_instruction if used_indices_only else "")
+        )
+    else:  # free_text
+        system = (
+            "You are a legal RAG assistant for DIFC law documents. "
+            "Answer ONLY using the provided context snippets. "
+            "Be concise. Maximum 280 characters. No markdown. Plain text only. "
+            "CRITICAL: If the answer is not explicitly stated in the context, "
+            "you MUST respond with EXACTLY this phrase and nothing else: "
+            "There is no information on this question in the provided documents. "
+            "Do NOT explain why. Do NOT say 'the context does not contain'. "
+            "Do NOT say 'I cannot'. Just use the exact phrase above. "
+            "Do NOT cite source numbers like '[1]' or 'context [3]' in your answer."
+            + (_sources_instruction if used_indices_only else "")
+        )
+
+    user = f"Question: {question}\n\nContext:\n{context}"
+
+    client_a = anthropic.Anthropic(api_key=api_key)
+
+    t0 = time.time()
+    t_end = None
+    ttft_ms = None
+    answer_parts = []
+    input_tokens = 0
+    output_tokens = 0
+
+    try:
+        with client_a.messages.stream(
+            model=model,
+            max_tokens=300,
+            system=system,
+            messages=[{"role": "user", "content": user}]
+        ) as stream:
+            for text in stream.text_stream:
+                if ttft_ms is None:
+                    ttft_ms = round((time.time() - t0) * 1000)
+                answer_parts.append(text)
+
+            # Get usage from final message
+            final_msg = stream.get_final_message()
+            input_tokens = final_msg.usage.input_tokens
+            output_tokens = final_msg.usage.output_tokens
+            t_end = time.time()
+            total_time_ms = round((t_end - t0) * 1000)
+            if ttft_ms and output_tokens > 1:
+                time_per_output_token_ms = round(
+                    (t_end - (t0 + ttft_ms / 1000)) / (output_tokens - 1) * 1000, 2
+                )
+            else:
+                time_per_output_token_ms = round(total_time_ms / max(output_tokens, 1), 2)
+
+    except Exception as e:
+        return {"answer": str(e), "llm_used": "error",
+                "ttft_ms": 0, "input_tokens": 0, "output_tokens": 0, "used_indices": [],
+                "total_time_ms": 0, "time_per_output_token_ms": 0}
+
+    answer = "".join(answer_parts).strip()
+    # Extract used source indices
+    used_indices = []
+    if "SOURCES:" in answer:
+        parts = answer.rsplit("SOURCES:", 1)
+        answer = parts[0].strip()
+        src_part = parts[1].strip()
+        if src_part.lower() != "none":
+            for s in src_part.split(","):
+                s = s.strip()
+                if s.isdigit():
+                    used_indices.append(int(s) - 1)  # convert to 0-based index
+    # For free_text: if answer starts with the unanswerable phrase, truncate
+    if answer_type == "free_text":
+        unanswerable = "There is no information on this question in the provided documents."
+        if answer.startswith(unanswerable):
+            answer = unanswerable
+    # Normalize null string to None
+    if answer.lower().strip() in ("null", "none", "n/a", ""):
+        answer = None
+    # Truncate free_text to 280 characters
+    if answer_type == "free_text" and isinstance(answer, str):
+        if len(answer) > 280:
+            answer = answer[:277] + "..."
+    # Parse names JSON array
+    if answer_type == "names" and answer is not None:
+        import re as _re
+        # Strip markdown code fences
+        _clean = _re.sub(r'```(?:json)?\s*', '', str(answer)).strip().rstrip('`').strip()
+        try:
+            import json as _json
+            _parsed = _json.loads(_clean)
+            if isinstance(_parsed, list):
+                answer = [str(x).strip() for x in _parsed if x]
+            else:
+                answer = None
+        except Exception:
+            # Try to extract quoted strings
+            _names = _re.findall(r'"([^"]+)"', _clean)
+            answer = _names if _names else None
+    if answer_type == "boolean" and answer is not None:
+        if str(answer).strip().lower() == "true":
+            answer = True
+        elif str(answer).strip().lower() == "false":
+            answer = False
+    # Convert number answers to int
+    if answer_type == "number" and answer is not None:
+        try:
+            answer = int(str(answer).strip())
+        except (ValueError, TypeError):
+            try:
+                answer = float(str(answer).strip())
+            except (ValueError, TypeError):
+                pass
+    if ttft_ms is None:
+        ttft_ms = round((time.time() - t0) * 1000)
+
+    return {
+        "answer": answer,
+        "llm_used": model,
+        "ttft_ms": ttft_ms,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "used_indices": used_indices,
+        "total_time_ms": total_time_ms,
+        "time_per_output_token_ms": time_per_output_token_ms,
+    }
+
+
 CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 
 
