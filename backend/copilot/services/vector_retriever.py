@@ -36,6 +36,7 @@ def vector_retrieve(workspace_id: int, query_vector: List[float], top_k: int = 5
             "document_id": ch.document_id,
             "document_title": ch.document.title,
             "chunk_id": ch.id,
+            "chunk_uid": ch.chunk_uid,
             "chunk_index": ch.chunk_index,
             "matched_terms": [],
             "distance": dist,

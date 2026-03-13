@@ -16,7 +16,20 @@ def _stub_embed_one(text: str, dim: int) -> List[float]:
     rnd = random.Random(seed)
     return [rnd.uniform(-1.0, 1.0) for _ in range(dim)]
 
+
+def _openai_embed(texts: List[str]) -> List[List[float]]:
+    from openai import OpenAI
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    response = client.embeddings.create(
+        model=os.getenv("EMBEDDINGS_MODEL", "text-embedding-3-small"),
+        input=texts,
+    )
+    return [item.embedding for item in response.data]
+
+
 def embed_texts(texts: List[str]) -> List[List[float]]:
     if PROVIDER == "stub":
         return [_stub_embed_one(t, DIM) for t in texts]
-    raise RuntimeError(f"Unsupported EMBEDDINGS_PROVIDER={PROVIDER!r} (only 'stub' for now)")
+    if PROVIDER == "openai":
+        return _openai_embed(texts)
+    raise RuntimeError(f"Unsupported EMBEDDINGS_PROVIDER={PROVIDER!r}")
