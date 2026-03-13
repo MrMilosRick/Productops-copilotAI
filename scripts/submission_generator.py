@@ -651,6 +651,8 @@ def ask_one(
             answer = None
     chunk_ids = body.get("retrieved_chunk_ids") or []
     retrieved_chunk_pages = chunk_ids_to_pages(chunk_ids)
+    # Limit number of grounding pages (experiment: 4 pages)
+    retrieved_chunk_pages = retrieved_chunk_pages[:4]
     if _is_unanswerable(answer):
         retrieved_chunk_pages = []
     # Fallback grounding from known pages when retrieval returns nothing
