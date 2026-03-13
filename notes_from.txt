@@ -1,0 +1,704 @@
+This is the start of the #announcements channel. 
+Sergey Verentsov — 20/02/2026 18:42
+We’ve published a preliminary version of the dataset for the Agentic RAG Legal Challenge.
+
+This early version is available to participants only. It’s not the full release yet — some questions and documents are still missing — but it already gives a clear picture of the format, scope, and evaluation approach. See ⁠participant-announcements 
+
+Most of the questions in this preliminary version are expected to be included in the final public dataset. The complete and official version will be released on March 11.
+
+More updates coming soon. 
+Sergey Verentsov — 03/03/2026 20:07
+@everyone 
+📌 Save the date! Onboarding Webinar — March 9, 2026 • 20:00 (GMT+04:00)
+
+Hey everyone 👋 Join our Q&A session on March 9! We’ll cover:
+
+What is this competition about? The ARLC context, the core idea of the challenge, and what prizes we are awarding (and for what).
+Dataset structure: What documents are available, what types of questions there will be, in what proportions, and how to work with the materials.
+Evaluation methodology: Scoring rules, key metrics, penalties and bonuses, and how the final score is calculated.
+Platform and starter kit: The full participant journey, from getting platform access to preparing a submission, uploading it, and receiving a score.
+Q&A session: Answers to participants’ questions.
+
+🗓️ March 9, 2026 / 20:00 (GMT+04:00) / Link will be shared in Discord ⁠announcements  on March 9
+
+📍Just joined the server? Complete the bot Sign-up ⁠welcome⁠  to unlock the participant channels.
+
+See you there! 
+Sergey Verentsov — 09/03/2026 16:23
+🔔 Today! Agentic RAG Legal Challenge Onboarding Webinar
+📅 March 9, 2026 • 20:00 Dubai (GMT+4) / 19:00 MSK (GMT+3) / 17:00 CET (Europe, GMT+1)
+
+👉 Everyone is welcome @everyone , attend free via Zoom
+
+🔗 https://us05web.zoom.us/j/84938590581 / Or join Zoom, meeting: 849-3859-0581
+
+We’ll cover:
+
+What is this competition about?
+Dataset structure
+Evaluation methodology
+Platform and starter kit
+Q&A session
+
+See you there!
+Sergey Verentsov — 10/03/2026 16:28
+Hello @everyone !
+Thank you again for attending yesterday’s webinar. Below are the materials from the session:
+Recording: https://drive.google.com/file/d/16Gz8Fhq7DuGgMUIOEk06puFlnH3-XP-s/view?usp=drive_link
+Slides presented during the webinar: https://drive.google.com/file/d/1Ha4UchuyCNGPmUC0U-jWHdl695uYEgB2/view?usp=drive_link
+Answers shared during the session: https://drive.google.com/file/d/1IsRdrH1qQ2sccv7TEsrAKSc4PbvWvFCP/view?usp=drive_link
+
+Important update: Access details to enter the platform will be sent to the email address you provided when registering.
+
+Questions we didn’t get to answer during the live session are now posted there: ⁠questions⁠.
+
+P.S. Feel free to stop by ⁠meet-the-teams 👋 and introduce yourself (or your team)
+Sergey Verentsov — Yesterday at 13:12
+Hello, @participant !
+Yesterday we sent platform access credentials to all teams that registered on or before March 9.
+The credentials were sent to the email of the first person who registered the team in the Discord form.
+
+The platform itself is already available and you can log in. However, please note that API methods for downloading data (/questions and /documents) are not yet enabled, as we are making final adjustments to the dataset. These methods will become available later today.
+
+If your team registered on or before March 9 and did not receive the email, please contact me on Discord with your team name. It looks like a couple of teams have blocked the competition email, so the message did not reach them.
+
+If your team registered on March 10 or later, @Sergey Verentsov  or @Daniel will send you the platform access via Discord DM. 
+Sergey Verentsov — Yesterday at 18:24
+@participant 
+The public dataset is now ready. You can download the documents and questions via the /documents and /questions endpoints using API key from the platform.
+
+Main changes from the previously published dataset: 
+Replaced vague and duplicate questions about legislation with more specific questions that reference exact pages and sections of the documents.
+Replaced abstract multi-document boolean questions with clearer, document-anchored questions.
+Corrected errors in adversarial questions.
+Added questions covering cases that were not previously included.
+
+If you uploaded any submissions to the platform before the dataset was released, those submissions have been removed so that your attempts are not counted or wasted on submissions made prior to the dataset release. 
+Sergey Verentsov — 14:19
+Hello @participant ,
+
+We will be performing infrastructure maintenance on the platform shortly. During this time, the platform and the API for submissions and data uploads may be unavailable for 1 hour at maximum.
+
+Please note that this maintenance only affects the infrastructure. Datasets, evaluation process, and your existing submissions will remain unchanged.
+
+Thank you for your understanding.
+Sergey Verentsov — 14:39
+@participant Maintenance finished, the platform is back online
+
+
+This is the start of the #tech-discussion channel. 
+Pavel — 27/02/2026 20:05
+Hi! I have a couple of technical questions
+What should the system be? Is it a website or an API or?
+Are there any examples of responses so that we can see the expected format? (schema)
+ 
+Do participants host their own systems? Are there any limits on used system resources?
+How, by whom, and in what format will documents be uploaded to the system?
+How much time will be allowed for processing documents, and will processing time be taken into account in the evaluation?
+The telemetry specifies “retrieved chunk IDs” as a mandatory metric. What is this? Is there a complete example of the expected telemetry?
+The FAQ states: "Any publicly accessible APIs for LLMs, embeddings, or search. Private, self-hosted, or undisclosed models are not allowed to ensure reproducibility." Does this mean that, for example, If i want just to store text in relational database to do search, this database should also be external? Or we are talking only about APIs related to LLMs? Not clear at all
+Sergey Verentsov — 27/02/2026 21:45
+The submission should be a script that generates a JSON file containing answers to the provided questions. This JSON must be submitted to the competition platform via the platform API. Platform access will be available no later than March 9, so you will be able to test submissions. We will also publish the starter kit next week, including a baseline solution and a submission script.
+Sergey Verentsov — 27/02/2026 21:46
+We will provide the JSON submission schema in the starter kit. In general, for each question you will need to submit: the answer, time to first token, time per output token, total response time, retrieved chunk pages, number of input and output tokens, and model name.
+Sergey Verentsov — 27/02/2026 21:46
+Participants host their own systems. There are no resource limits.
+Sergey Verentsov — 27/02/2026 21:47
+You will receive documents as a ZIP archive of PDFs. You may upload and preprocess them in any way you choose. You can review the document format in the dataset preview (see ⁠participant-announcements ).
+Sergey Verentsov — 27/02/2026 21:47
+Preprocessing time is not included in the evaluation. However, once the private test set and the full document set are published, you will have 48 hours to submit your solution—so please ensure preprocessing is automated.
+Sergey Verentsov — 27/02/2026 21:48
+For example, if your answer uses page 3 of document abc123.pdf, the retrieved chunk ID must be abc123_3. The starter kit will cover the full submission preparation workflow.
+Sergey Verentsov — 27/02/2026 21:48
+This means you must use either publicly accessible APIs or open-source components. You may not use proprietary models that are not publicly available. As a rule of thumb: if you can publish your solution on GitHub without violating any licenses, it is acceptable.
+Alex Chernysh — 27/02/2026 22:03
+Hi @Sergey Verentsov  - quick alignment questions from my side. I already have an end-to-end pipeline running on the preview dataset and want to align early with the submission contract to avoid rework when the starter kit/schema lands.
+
+1) For retrieved_chunk_ids: should we always report page IDs exactly as pdf_id_page (e.g. abc123_3) even if we internally chunk smaller than a page? If yes: 1-based pages, and top-K retrieved pages vs only cited/used pages?
+2) TTFT / time-per-output-token: should TTFT be measured from request start to the first streamed token, or is non-stream completion acceptable as long as TTFT is reported?
+3) Token counts: do you expect provider-reported usage when available, or is approximate tokenization acceptable?
+
+Thanks 
+Sergey Verentsov — 27/02/2026 22:36
+1) You must reference the page number even if you internally split content into smaller chunks. Include only the pages that were actually used. Whether paging should be 0-based or 1-based - will check, confirm later. 
+2) Since you submit a JSON object, you should measure TTFT yourself—from request start to the first streamed token—and include that value in the submission object. If you’re not using a streaming API, then TTFT equals total response time.
+3) Better use provider-reported usage when available.
+Alex Chernysh — 27/02/2026 22:38
+@Sergey Verentsov Fair enough, thanks.
+kapkan — 27/02/2026 23:48
+Hello, can we know the balancing coefficient between quality and TTFT for evaluation? Also, do you allow unlimited parallel requests to LLM API to get the first token faster, if it requires several LLM calls? 
+NN — 02/03/2026 15:49
+Hey guys! I assume the challenge is LLM friendly? Can I utilize my agentic teams to develop and present the solution?
+Sergey Verentsov — 02/03/2026 16:46
+Your final score will be multiplied by the TTFT coefficient. This coefficient ranges from 0.85 (if the average TTFT > 5.0 sec) to 1.05 (if the average TTFT < 1.0 sec). 
+
+Regarding parallel requests — I’m not sure I fully understood your original question, but an important clarification: the "first token" in TTFT refers to the first token of the final answer returned to the user, not the first token produced by any model in your internal pipeline.
+
+For example, suppose your pipeline works as follows:
+You use Gemini Flash to generate alternate phrasings of the user’s question.
+You then search for relevant sources based on these alternate phrasings.
+Finally, you use GPT to generate the final answer based on the retrieved sources.
+In this case, TTFT should be measured up to the first token produced by GPT in the final answer, not the first token produced by Gemini Flash.
+
+However, if instead of using GPT at the end you send parallel requests to multiple models and return the response from whichever model generates the first token first, that is acceptable. Note that the time spent generating alternate phrasings and performing the search must still be included in the TTFT measurement. 
+Sergey Verentsov — 02/03/2026 16:53
+Yes, the use of LLMs is expected. There are no restrictions on using multiple agents, agent-based pipelines, or specialized agents handling different tasks within your solution.
+
+Also, during development, you are free to use tools such as GitHub Copilot, OpenAI Codex, Cursor, or any similar resources.
+NN — 02/03/2026 22:45
+Got it, thanks!
+ohikava — 03/03/2026 12:03
+Hello, I have problems with signup. I first attempted to sign up in the friday, I filled all required forms and still got response. Can you check please?
+Daniel — 03/03/2026 12:04
+You have already got the participant role.
+aggrr — 03/03/2026 12:34
+Same with me, but i have no role.
+Daniel — 03/03/2026 12:36
+You did not fill the form for the signing up.
+⁠welcome⁠ 
+aggrr — 03/03/2026 12:40
+I did. I received a message from signup bot in that channel (visible only me), i should have taken a screenshot.
+Well i need to do it again i guess...
+Daniel — 03/03/2026 12:41
+There's no your form.
+Fill out a new one and wait the getting of role.
+Screenshot is not required. 
+Ilya Rice — 03/03/2026 15:00
+Source files from participant-announcements has quite a few duplicates. From 87 files, only 67 are unique; the remaining 20 are duplicates.
+This raises a few questions: 
+How greedy should the grounding be?
+If the same info is in 10 different sources, do we need to provide all 10?
+What if there is a page that does not provide a direct answer, but contains secondary, yet still relevant information?
+How are missing source references penalized? (e.g., only 3 out of 4 sources provided)
+How are irrelevant source references penalized?
+Alex Chernysh — 03/03/2026 16:08
+Few more points on evaluation mechanics:
+LLM-as-judge: does it compare our free-text answers against reference answers, or evaluate faithfulness directly against the source documents?
+Chunk scoring: is there a penalty for including marginally relevant pages in retrieved_chunk_ids, or only for missing critical ones?
+Unanswerable questions: if a question is genuinely unanswerable from the corpus (e.g. references a regulation not in the document set), should we return an explicit "not answerable" or attempt a best-effort answer?
+Thanks
+Sergey Verentsov — 03/03/2026 19:15
+Non-unique files is an error, that will be fixed prior to the release of the public dataset on March 11.
+
+About grounding procedure.
+For each question, there is a predefined golden set of sources. This set is verified to be sufficient for generating the correct answer. In this context, a "source" refers to a specific page within a document.
+Your predicted set of sources will be compared against the golden source set. The evaluation metric is a weighted F-score with β = 2.5 (see the formula in the attachment). This weighting makes recall ~6 times more important than precision, meaning that missing required evidence is penalized significantly more heavily than including unnecessary sources.
+
+About your other questions: 
+If the same info is in 10 different sources, do we need to provide all 10?
+ No. You are expected to identify the exact source specified in the golden set. For example, if a question relates to a specific section of a law and the dataset contains multiple editions of that law, the golden set will include only the latest edition - even if the same section appears in earlier versions.
+What if there is a page that does not provide a direct answer, but contains secondary, yet still relevant information?
+  If the information on a page is not required to generate the reference answer, that page will not be included in the golden set, even if it contains related information. 
+Image
+Sergey Verentsov — 03/03/2026 19:30
+An LLM-based judge compares free-text answers to the reference answers.
+A penalty is applied, see the formula in my previous message.
+The dataset intentionally includes questions that do not have an answer in the corpus.
+For deterministic questions (those not of type free_text), the expected answer is null, with an empty reference list.
+For free_text questions, the expected answer should in free form  state that the information is not available (e.g., "There is no information on this question") with an empty reference list as well.
+ 
+Alex Chernysh — 03/03/2026 19:45
+That's very valuable, thanks
+ohikava — 04/03/2026 19:29
+Hello, can we know 
+what metric is used to evaluate answer? (free form and others)
+the balancing coefficient between the right answer evaluation and the sources evaluation
+doest test dataset contains questions that are not applicable or not such information exists? For example one question asks about juries in the case, but DIFC has no juries
+Sergey Verentsov — 04/03/2026 21:30
+Hello! 
+1-2. The formula for overall score is: S×G×T×F, where:
+   
+S - the average score across all questions (0–1). Free-form responses are evaluated using an LLM-as-a-judge approach, while deterministic questions are scored using binary evaluation.
+G - the average grounding score (0–1), calculated as a weighted F-score based on the sources list. Details are available here:
+⁠tech-discussion⁠
+ 
+T - whether the telemetry is provided (0.9-1) - 0.9 if telemetry is missing for all answers, 1 if provided for all questions
+F -  average TTFT score (0.85-1.05)  - see here ⁠tech-discussion⁠
+A more detailed explanation of the scoring methodology will be provided during the webinar on March 9. A recording will also be available afterwards.
+Such  questions are included in the dataset, see here: ⁠tech-discussion⁠
+ 
+BaD — 05/03/2026 05:09
+How will you verify the TTFT measurement? What if a participant reports a TTFT lower than the actual value by post-processing timestamps/logs?
+anatoly_bobrovsky — 05/03/2026 14:31
+Great question — and a fair one! Here's how we approach it:
+
+TTFT is self-reported in telemetry, but we have several layers of protection against falsification:
+
+Code audit — all prize contenders undergo a mandatory code review, where reviewers can reproduce the pipeline and cross-check reported timings against actual execution.
+Statistical analysis — we run pattern analysis across all telemetry submissions to flag anomalies that are statistically inconsistent.
+Telemetry isn't the only signal — it's a relatively small bonus multiplier on top of grounding and answer quality, which carry far more weight. So gaming timestamps would be a lot of effort for minimal gain, with a real risk of disqualification.
+Fincher [A\],  — 05/03/2026 18:01
+1) Can you confirm: are chunk/page IDs 1-based or 0-based?  (e.g. first page of doc = _1 or _0?)
+2) For deterministic questions (boolean/number/name) where the answer is not in the corpus — should we return JSON null or the string "null"?
+ [A\], 
+anatoly_bobrovsky — 05/03/2026 18:40
+Hello, Fincher!
+
+Page numbers are 1-based — the first page of a document is 1, not 0.
+
+Use JSON null (not the string "null").
+Fincher [A\],  — 05/03/2026 19:15
+Thank you for the quick clarification. If you don’t mind, I have two more questions:
+1) For retrieved_chunk_ids in submission should we include ALL pages retrieved during search, or ONLY pages actually cited in the answer?
+2) Is there a warm-up submission period before March 18 where we can test the platform API?
+ [A\], 
+anatoly_bobrovsky — 05/03/2026 19:28
+Happy to help!
+
+Include only the pages actually used to generate the answer, not all pages retrieved during search. The grounding score penalizes extra pages that aren't relevant to the answer, so adding unnecessary ones will hurt your score.
+
+Yes The warm-up phase starts on March 11 with the public demo set (30 documents, 100 questions). You can use it to debug your pipeline and test the full submission flow before the final stage.
+Fincher [A\],  — 05/03/2026 23:07
+Perfect, that's very helpful! Two more quick ones while I have you:
+
+For boolean answers - should we return the strings "Yes"/"No", or JSON booleans true/false?
+
+Will questions.json in the starter kit include the answer_type field for each question, or do we need to detect the expected answer type ourselves?
+Сергей — 07/03/2026 13:36
+Hi,@Sergey Verentsov 
+Here's the question: when specifying the page of the document where the information is taken from, should we specify the PDF page number - the physical page of the file: 1, 2, 3, 4, 5 or
+document page label - the number printed on the page itself: could it be i, 1, 2, 3?
+Ilya Rice — 07/03/2026 13:52
+Just double-checking here.
+Is it okay to drop currency in such questions? I understand that the answer type number implies it, but common sense suggests that the answer 405351504 is somewhat ambiguous without mentioning the currency. And I encountered several currencies within one document 
+Image
+Can you specify exactly what the answer format should be, with "answer_type": "date"?
+arakser — 07/03/2026 21:43
+Hi, 
+Question about the grounding score:
+What should I put in the retrieved chunk IDs section if the same information can be retrieved from different pages of the document (e.g., the law title is specified on the title page and in the "Title" section of the text)?
+Victor Zaguskin — 08/03/2026 18:17
+Hi all! Regarding proprietaty tools or models - what if part of my preprocessing pipeline implemented as a skill for claude code for example? If I publish the skill .md files and claude configuration(models, mcps) - is it allowed?
+ [A\], 
+anatoly_bobrovsky — 09/03/2026 14:05
+Use JSON booleans true / false — not the strings "Yes" or "No".
+
+Yes, answer_type is included in the questions.json — you don't need to detect it yourself. Each question comes with id, question, and answer_type fields.
+anatoly_bobrovsky — 09/03/2026 14:09
+Hello, Sergey!
+It's the physical PDF page number — not the label printed on the page itself. So the first page of the file is always 1, regardless of what's printed on it.
+anatoly_bobrovsky — 09/03/2026 14:36
+Hello, Ilya Rice!
+
+For number type — return just the numeric value (e.g. 405351504), without the currency.  The answer_type field is your signal for what format to use.
+
+Great catch though — we'll explicitly specify the expected currency in the official dataset release.
+
+For date type — use ISO 8601 format: YYYY-MM-DD (e.g. 2025-03-11).
+anatoly_bobrovsky — 09/03/2026 14:40
+Hello, arakser!
+Good question! When building the dataset, we aim to make gold references unambiguous — meaning each question is designed to have a single, clear source location in the corpus.
+anatoly_bobrovsky — 09/03/2026 14:45
+Hello Victor!
+
+Yes, that's allowed — the key requirement is that your pipeline is publicly accessible and reproducible. Since Claude Code and the Claude API are publicly available, using them as part of your preprocessing pipeline is fine.
+
+Publishing your skill .md files along with the Claude configuration (models, MCPs) is sufficient for reproducibility. Just make sure everything needed to reproduce your pipeline is included in the code archive you submit.
+Ilya Rice — 09/03/2026 16:15
+And if a valid answer consists only of the year and the month? Or just the year only?
+YYYY-MM and YYYY accordingly? Or is there no way we have such cases?
+Ilya Rice — 09/03/2026 16:16
+sure everything needed to reproduce your pipeline is included in the code archive you submit
+Including API keys?)
+Maxim Metelskii — 10/03/2026 03:51
+May be I am missing something, but if we submit JSON files by ourselves than one can prepare all answers during ingestion and indexing phase, so, TTFT and token usage will be virtually zero during submission JSON file generation.
+So basically, it becomes a competition of who can generate the best answers to all questions within 48 hours using unlimited compute resources?
+Alex Chernysh — 10/03/2026 10:22
+Not from the org team, but a couple of things from the rules that might address this:
+
+The final private set (1000+ questions, 300+ docs) drops with a 48h window - preprocessing must be automated, so you can't manually pre-compute answers
+Submission includes source code for verification/reproducibility - so hardcoded answers would be caught during code review
+Per-answer telemetry (TTFT, tokens, chunk IDs) is mandatory - 0ms TTFT across 1000+ answers would be a pretty obvious red flag
+
+That said, you raise a fair point that TTFT is self-reported in the JSON. I'd assume the org team can re-run submissions to verify, but it would be good to get official confirmation.
+
+Team, please correct me if I'm wrong! 
+Nik_gorbatyuk — 10/03/2026 12:04
+Will be example of correct submission based on public dataset questions presented in the final public dataset?
+Victor Zaguskin — 10/03/2026 13:15
+@Maxim Metelskii fair points, I'd like to hear from org team on that as well. Without testing the system on the new questions, not available during ingestion/indexing phases - one cannot check it generalises at all.
+Sergey Verentsov — 10/03/2026 14:07
+Confirming this. ⁠tech-discussion⁠
+who can generate the best answers to all questions within 48 hours using unlimited compute resources?
+
+Grounding is just as important as the answers themselves. Even if you have the most advanced model, without a strong search pipeline your overall score will remain low.
+
+I would say, search is not the kind of problem that can simply be solved by pouring money into it and expecting results to improve proportionally with the amount invested.
+Sergey Verentsov — 10/03/2026 14:16
+We believe that within the two days you have to submit results on the private dataset, you simply won’t have enough time to run too many additional experiments. You would need time to tweak pipeline, run it for 1000 questions and most importantly, relabel the data yourselves (since you will only have two submissions available at the final stage).
+
+I think this creates a reasonable balance. On one hand, it prevents participants from making major adjustments or extensively tuning their systems to the private dataset. On the other hand, it still allows you to fix small issues - for example, if your pipeline breaks because it encounters some unusual symbol in a document. The idea is to give teams enough time to resolve practical issues like that, but not to run entirely new rounds of experimentation. 
+Victor Zaguskin — 10/03/2026 15:36
+@Sergey Verentsov thanks for clarifications. Still a bit unclear - so far looks like the best strategy is to invest in pipeline that will be able to index the private document set to obtain the answers for 1000 specific questions in 48 hours. Than after the index is complete - the final solution will just send the answers with near zero TTFT. Will such solution be accepted? If not, what is the specific limit on what we can and cannot do during the indexing stage?
+Sergey Verentsov — 10/03/2026 18:56
+You cannot use the questions on the indexing stage, only documents. 
+
+pipeline that will be able to index the private document set to obtain the answers for 1000 specific questions
+I am not sure I understood you correctly. Including questions to index is prohibited, but tweaking retrieval parameters to better search for these questions is theoretically possible, and we won't be able to detect it. But to evaluate such experiments you will have to manually find correct sources for all questions, which seems impossible
+Maxim Metelskii — 10/03/2026 19:23
+Well, the idea of indexing is to store redundant data and add compute during insertion time to get response to specific queries as fast as possible. Even if you don't use private questions explicitly, you still can make your index in such a way, that it is extremely good for that 1000 questions (at least part of it), but overall generalization is quite poor
+Ilya Rice — 10/03/2026 22:04
+In a webinar presentation, there is a rule about free_text answer format:
+Coherent text of 1-3 paragraphs, max 280 characters.
+280 characters is a couple of sentences, not 1-3 paragraphs. Maybe 280 words, not characters?
+Sergey Verentsov — 10/03/2026 23:13
+Thanks for noticing! It's 280 characters and 1-3 sentences, not paragraphs
+Ilya Rice — Yesterday at 09:27
+I have a question about number — 1% relative tolerance:
+abs(predicted - actual) < 0.01 × actual → 1 or 0.
+
+If actual = 0. It breaks. Just in case, in such a situation you perform a simple strict comparison: actual==predicted ?
+Igor Tomashevskiy — Yesterday at 11:12
+same issue with negative numbers — or are all values in the dataset guaranteed to be non-negative?
+and what string normalization is applied before computing deterministic metrics (name exact match and names Jaccard)? is comparison case-insensitive ("Chief Justice" = "chief justice" ≠ "the Chief Justice")?
+Ilya Rice — Yesterday at 12:01
+Quick clarification on F_avg (TTFT coefficient) computation:
+
+Is the TTFT modifier computed from the average TTFT across all questions, or as the average of per-question modifiers?
+
+Earlier in this channel, it was clarified as
+Your final score will be multiplied by the TTFT coefficient. This coefficient ranges from 0.85 (if the average TTFT > 5.0 sec) to 1.05 (if the average TTFT < 1.0 sec)
+
+Webinar slides formula table
+"F_avg | TTFT speed | Average modifier across all questions in the submission"
+suggests each question gets its own modifier from the TTFT table, then they're averaged.
+
+
+Interpretation 1 (global average): 80 easy questions answered in 0.2s, 20 hard questions answered in 3.0s. avg_TTFT = (80 × 0.2 + 20 × 3.0) / 100 = 0.76s → F = 1.05 
+Fast answers on simple questions "free up" time budget for complex ones. Smart time allocation is rewarded.
+
+Interpretation 2 (per-question modifiers): 90 easy questions answered in <1s (modifier 1.05 each), 10 hard questions answered in >5s (modifier 0.85 each). F_avg = (90 × 1.05 + 10 × 0.85) / 100 = 1.03 
+Whether each hard question takes 6 seconds or 600 seconds, the result is the same 1.03 - there is no incentive to optimize hard questions beyond the 5s threshold, and no way to compensate by being faster on easy ones.
+
+
+I designed my pipeline based on your message in Discord a week ago. 
+If you changed the methodology, please let me know as soon as possible - the pipeline will take significant rework.
+Sergey Verentsov — Yesterday at 12:29
+It's averaging modifier (interpretation 2 in your case), sorry for the confusion earlier.
+Sergey Verentsov — Yesterday at 12:32
+@Igor Tomashevskiy @Ilya Rice 
+there is special handling for negative actual and actual = 0, here is the exact code of the evaluator: 
+ def _calculate_score(self, prediction: Any, reference: Any) -> float:
+        try:
+            # Parse both as numbers
+            pred_val = float(prediction)
+            ref_val = float(reference)
+
+            # Special case for zero to avoid division by zero logic or incorrect tolerance
+            if ref_val == 0:
+                return 1.0 if pred_val == 0 else 0.0
+
+            # Tolerance of up to 1% of reference value
+            # Note: Using abs(ref_val) for tolerance calculation to handle negative numbers
+            if abs(pred_val - ref_val) < 0.01 * abs(ref_val):
+                return 1.0
+            return 0.0
+        except (ValueError, TypeError):
+            # If parsing failed → 0 points
+            return 0.0
+Sergey Verentsov — Yesterday at 12:35
+for both name and names strings are preprocessed as s.strip().lower(),  so you are correct:  "Chief Justice" = "chief justice" ≠ "the Chief Justice"
+Victor Zaguskin — Yesterday at 13:10
+why could I be getting that requests.exceptions.HTTPError: 403 Client Error: Forbidden for url: https://platform.agentic-challenge.ai/api/v1/questions  The script just follows the example and the api key is set  in the .env import os
+PHASE = "eval"
+if not os.path.exists(PHASE):
+    os.mkdir(PHASE)
+
+from arlc import EvaluationClient
+
+client = EvaluationClient.from_env()
+questions = client.download_questions(PHASE)
+client.download_documents(os.path.join(PHASE, "docs_corpus"))
+Fincher [A\],  — Yesterday at 15:08
+Are the warm-up questions the same as in the dataset we received earlier 
+(questions.json from the preview)? Or do we need to wait for GET /questions 
+to return data before submitting?
+ [A\], 
+Sergey Verentsov — Yesterday at 15:10
+They are not the same, wait for the /questions method to be enabled, we'll publish an announcement.
+evvbmstu — Yesterday at 15:37
+The same about /documents endpoints I suppose?
+evvbmstu — Yesterday at 18:53
+Forwarded
+@participant 
+The public dataset is now ready. You can download the documents and questions via the /dataset and /questions endpoints using API key from the platform.
+
+Main changes from the previously published dataset: 
+Replaced vague and duplicate questions about legislation with more specific questions that reference exact pages and sections of the documents.
+Replaced abstract multi-document boolean questions with clearer, document-anchored questions.
+Corrected errors in adversarial questions.
+Added questions covering cases that were not previously included.
+
+If you uploaded any submissions to the platform before the dataset was released, those submissions have been removed so that your attempts are not counted or wasted on submissions made prior to the dataset release.
+#announcements  •  Yesterday at 18:24
+But there is no /dataset endpoint an openapi specification, did you mean /documents?
+Sergey Verentsov — Yesterday at 19:01
+Yes, fixed original post
+evvbmstu — Yesterday at 21:15
+By the way, what the algorithm for a tie on the leaderboard? 
+
+I was about to tell my mom and grandma I placed first out of 10 submissions, but the guys from Tzur Lab pushed me down, and I had to cancel the call.
+Image
+Alex Chernysh — Yesterday at 22:09
+Sorry - we were shipping under rocket sirens. It got efficient.
+evvbmstu — Yesterday at 22:34
+Sorry to hear this guys, I hope this kind of motivation will disappear soon
+Sergey Verentsov — 00:54
+That's not a tie, you have 0.496921, while Tsur Labs is 0.497311 :D
+
+Exact tie is very unlikely
+zer0Tokens — 06:18
+
+
+
+This is the start of the #questions channel. 
+Tatar_Obi_Wan — 26/02/2026 14:15
+hi! is it possible to change team after the sign up?
+Sergey Verentsov — 26/02/2026 15:01
+Yes, that’s possible. Please send me a private message, and I’ll assist you with the change.
+no_name6518 — 02/03/2026 17:53
+Hi! What are the team size limitations?
+Sergey Verentsov — 02/03/2026 18:41
+Hi! 3 people max
+Ein — 02/03/2026 19:52
+Will i need to involve images in any eay to answer questions?
+E.g. reading images to extract information and that's it or even embedding images and during qa we will need to reason over images?
+harshald — 02/03/2026 20:20
+Hi @participant  I'm Harshal. participating in this challenge if anyone wants to form a team, I'll join the team.
+
+Linkedin -> https://www.linkedin.com/in/harshald9922/
+Fincher [A\],  — 02/03/2026 20:48
+Hey Harshal  sent you a connect request. Let’s discuss the challenge and team setup once you accept
+ [A\], 
+harshald — 02/03/2026 21:24
+Yeh received thanks Fincher
+Sergey Verentsov — 03/03/2026 13:26
+Some PDF documents may contain screenshots of text, so you may need to extract information from those images. However, embedding images is most likely not needed
+Ilya Rice — 03/03/2026 13:29
+Hi! Is it possible to send several submissions targeted for different extra goals? (E.g. one for lowest TTFT, and another - for best grounded)
+Sergey Verentsov — 03/03/2026 13:49
+Final scoring will be conducted as follows:
+The complete dataset will be released on March 18
+Each team may upload up to two submissions
+For the overall leaderboard, only the submission with the highest final score will be considered.
+
+Awards and nominations will be determined based on this leaderboard.
+
+For example, if you submit one model with the faster TTFT and a final score of 75%, and another with stronger grounding and a final score of 80%, only the second submission (80%) will be counted toward the overall leaderboard. The lower-scoring submission will not be considered.
+
+However, it is possible for a single submission to rank in the top three by final score while also achieving the best grounding or the best TTFT metric. In such cases, your solution may qualify for multiple awards.
+evvbmstu — 04/03/2026 21:15
+Hi everyone!
+We’ve summarized the most useful information from ⁠tech-discussion chat - huge thanks to @Sergey Verentsov for the detailed answers.
+
+Together with @shorosh, we also created a short cheat sheet covering:
+    •    the most common questions
+    •    basic EDA of the available dataset
+
+https://legal-challenge-report.pages.dev/ 
+Team Lawnjoyers
+Public Questions Analysis — Agentic RAG Legal Challenge
+100 questions across 87 documents. Answer type distribution, evaluation mechanics, grounding formula, and competition intel from #tech-discussion.
+Sergey Verentsov — 04/03/2026 21:36
+A small clarification regarding potential formatting issues: we have addressed this. Answers to deterministic question types must be submitted using the appropriate JSON data types (int, string, or list of strings). You will be able to see the expected format in the starter kit, specifically in the baseline submission example.
+evvbmstu — 04/03/2026 21:37
+Got it, thanks for clarification
+Aleksandr — 04/03/2026 23:43
+Hello! Thanks for the contest in the first place!
+Got some weird issue, I rarely use discord, so got lost and signed up twice from 2 different accounts
+If that's possible, could you please delete the other one for tag sasha_60959, so it won't cause any problems due to duplication of email for example
+Solarfunk — 05/03/2026 00:22
+Hi all
+Pawel [OAI],  — 05/03/2026 11:39
+What exactly constitutes the submission?
+only answers to the validation queries (in required format with telemetry) ?
+
+I believe in that case judges will like to reproduce the results so they need to see the source code or some binary artifact/API endpoint?
+
+What happens with the source code developed during this hackathon?
+anatoly_bobrovsky — 05/03/2026 13:56
+Hello, Aleksandr! No worries at all, it happens 😊
+
+We've noted your request — the duplicate entry for sasha_60959 will be removed.
+
+Thanks for letting us know and good luck in the contest! 🤞
+ [OAI], 
+anatoly_bobrovsky — 05/03/2026 14:19
+Hello, Pawel!
+
+Your submission consists of two files sent together:
+submission.json — your answers with telemetry
+code_archive.zip — a ZIP of your source code
+
+Once the starter kit is released, you'll be able to find the expected format there — check the baseline submission example.
+
+Both are required. The platform itself doesn't call your system — it only receives what you submit.
+
+Regarding the source code specifically — it is submitted privately and will not be published anywhere. It's only used by the organizers to verify the methodology and reproduce your results. This is only required for the final submission, not during the warm-up phase.
+
+If you rely on external LLM/embedding/search APIs, they just need to be publicly accessible. Local indexing (vector DB, etc.) is totally fine as part of your pipeline.
+ohikava — 05/03/2026 15:14
+Hello, can we enrich and extend docs dataset?
+anatoly_bobrovsky — 05/03/2026 17:27
+Hello! The document corpus is fixed and published by the organizers. Here's how it rolls out:
+
+March 11: Public demo set with 30 documents (100 questions) — for pipeline debugging and local testing
+Final stage: Full private corpus with 300 documents (900 questions), closing on March 19
+
+Important: the current public dataset is preliminary. Most of these questions and docs will likely remain in the final public dataset, but the official and complete public version will be released on March 11.
+Anna — 07/03/2026 02:28
+Hello, everyone! I’m glad to join. I’d like to ask how we should organize our teamwork. Do we need to create a separate server? Is it necessary to choose a team leader? And who is responsible for submitting our results on behalf of the team? 
+Solarfunk — 07/03/2026 17:34
+I filled sign form twice few days ago and nothing happens, just see same button sign up, what should I do?
+Just do it again third time, try to wait?
+Or mb I already in?)
+Daniel — 07/03/2026 21:24
+Hello, @Solarfunk .
+Your role has been updated to "Participant". You should now see additional channels available to you.
+Please monitor those channels, as important information will be posted there.
+
+Once the platform is launched, you will receive your login details via direct message. 
+GiovanniGenn — 08/03/2026 05:57
+Hi all, anyone could explain me how I should start?
+1) can I start?
+2) if yes how to do, where is the input text of challenge?
+Daniel — 08/03/2026 10:49
+Hello,
+This is to inform you that your application (Agentic RAG Legal Challenge) has been approved.
+Your role has been updated to "Participant". You should now see additional channels available to you.
+Please monitor those channels, as important information will be posted there.
+
+Once the platform is launched, you will receive your login details via direct message.
+
+No need to reply to this message.
+sam — 08/03/2026 17:57
+Can I participate alone?
+dimdimych7774 — 08/03/2026 18:25
+Hi everyone! How can we find out if our team’s status has been updated to “participant”?
+Daniel — 08/03/2026 19:05
+Hello, yes.
+Daniel — 08/03/2026 19:05
+Hi, check your roles in this discord channel.
+Aleksandr — 08/03/2026 22:17
+Hi! Will there be a recording of the Onboarding Webinar?
+Sergey Verentsov — 09/03/2026 02:50
+Hi! Yes, the recording will be published.
+sam — 09/03/2026 13:35
+can u give me role pls. i have submitted the form
+Daniel — 09/03/2026 14:17
+Hello. Read a private message from me
+Solarfunk — 09/03/2026 16:21
+It will be some meeting today?
+BODRETSKY — 09/03/2026 19:51
+Hi! I've signed up and still all hte channels from first Welcome message are locked
+Daniel — 09/03/2026 20:01
+⁠announcements⁠
+Ivan — 09/03/2026 21:36
+"🔔 Today! Agentic RAG Legal Challenge Onboarding Webinar
+📅 March 9, 2026 • 20:00 Dubai (GMT+4) / 19:00 MSK (GMT+3) / 17:00 CET (Europe, GMT+1)
+
+👉 Everyone is welcome @everyone , attend free via Zoom
+
+🔗 https://us05web.zoom.us/j/84938590581 / Or join Zoom, meeting: 849-3859-0581"
+
+Will the recording be provided?
+Zoom
+Join our Cloud HD Video Meeting
+Zoom is the leader in modern enterprise cloud communications.
+Join our Cloud HD Video Meeting
+Solarfunk — 09/03/2026 23:05
+its already finished?.. will be some record?
+HuRRi_CaNe — 09/03/2026 23:37
++,  missed online, is any record avaliable?
+John Arren — 10/03/2026 01:06
+Hello! Does information overlap between documents?
+mkgs — 10/03/2026 01:58
+will you publick the baseline repo?
+Sergey Verentsov — 10/03/2026 12:50
+@Solarfunk @HuRRi_CaNe yes, the recording will be available later today, see ⁠announcements
+MKK — 10/03/2026 13:23
+Hi!
+Can you guys give me a role pls, I don't have access to participants channels
+
+Submitted the form 4 days ago
+Daniel — 10/03/2026 13:43
+Check private messages
+Solarfunk — 10/03/2026 14:26
+and tomorrow also is planning some meeting?
+Sergey Verentsov — 10/03/2026 14:27
+No, why?
+Solarfunk — 10/03/2026 14:28
+I saw somewhere that something was planned for 11 too, maybe in the announcement from which I learned about this challenge in the first place
+Sergey Verentsov — 10/03/2026 14:29
+on 11 March, the public dataset will become available on the competition platform
+Sergey Verentsov — 10/03/2026 16:25
+Yesterday, there were several questions that were promised to double-check after the webinar. These are confirmed answers to them:
+
+Q: Do names have aliases, for example “UK” and “United Kingdom”?
+A: No. Names do not have aliases. When building the dataset, we aim to avoid ambiguities like this, so questions involving names are designed to have a single, unambiguous expected answer.
+
+Q: Can a numeric answer be a float?
+A: Yes. Float values are allowed and fall under the same number type as integers. In JSON there is no practical difference between writing 405351504 and 405351504.0 — both are valid. During evaluation, numeric answers are compared with a ±1% tolerance.
+
+Q: What if an answer begins on one page and continues onto the next — should we provide both pages?
+A: Yes, please include both pages. If an answer spans multiple pages, list all of them in retrieved_chunk_pages. In most cases, however, answers are contained within a single page and do not cross page boundaries. 
+Levinson — 10/03/2026 17:30
+Did you distribute already the credentials to a platform?
+Sergey Verentsov — 10/03/2026 17:48
+Not yet
+darttik — 10/03/2026 21:57
+Hi! How long has the application been considered? I submitted the form yesterday
+Daniel — 10/03/2026 21:59
+Hello. Check your private message from me.
+truberov — Yesterday at 13:17
+Hello, could someone help me obtain the credentials? My team registered on March 10.
+Sergey Verentsov — Yesterday at 13:32
+Hi! Your team (AiRina) was first registered by @Igor Tomashevskiy, the credentials was sent to his email
+Defetya — Yesterday at 13:53
+Hello! Apologies if this was asked before, but how many submission attempts do we have? 
+It says 10 for warmup phase, and 2 for the final one on the platform. Is that number of max total submissions, or does that number reset sometime?
+Sergey Verentsov — Yesterday at 14:16
+This number does not reset, you have 10 submissions for whole Warm-up phase (till 18.03) and 2 submissions for final stage (18.03-19.03)
+Gilaztdinov Rustam — Yesterday at 15:43
+Hi! Could you please clarify—am I correct in understanding that TTFT is measured only from the moment the question is received until the generation of the first token?
+
+The stages of index building, vectorization, and everything related to them are not included in that metric, right?
+Sergey Verentsov — Yesterday at 15:49
+Right, the sequence is the following: 
+ 
+Receiving documents
+Preprocessing documents, indexing etc.
+Receiving a question <- TTFT stopwatch starts here
+Processing pipeline, retrieval, etc
+Getting the first token of the final answer <- TTFT stopwatch stops here
+Getting full final answer
+dimdimych7774 — Yesterday at 20:25
+Hi, I received a password in my email, but I can't log in with it. What should I do?
+Sergey Verentsov — Yesterday at 20:31
+Go to "reset password", you will receive a reset link to your email
+Kenan Koiushov — Yesterday at 23:41
+Good evening! Will you fight multi-accounting? It's noticeable even from the nicknames, not to mention the possibility of registrations under different nicknames. This greatly increases the chances of the guys against us, who only have one account and two attempts in the final.
+Sergey Verentsov — 14:43
+We do have some safeguards in place to limit multi-accounting.
+
+When registering, participants are required to provide a link to their LinkedIn or GitHub profile. We verify that these links correspond to real profiles and the registration is tied to a real individual. This serves as our first layer of protection.
+
+At the same time, we intentionally keep the verification process relatively lightweight. Even with much stricter verification (for example, requiring identity documents), it would still be impossible to fully prevent someone from registering through a friend or another person.
+
+Regarding similar team names: we have seen two cases so far and checked both. One was a duplicate and another case: there are actually two teams. Even if they work at the same company and exchange ideas, that is not considered a problem and is generally a healthy part of research competitions.
+
+More importantly, we do not believe that multi-accounting provides a meaningful competitive advantage in this challenge. You can already see this on the current leaderboard: the participant in first place has made only one submission, while many teams have already made multiple submissions. In practice, the final score is much more dependent on the quality of the system than on the number of attempts
+
+
+
+We’re releasing a preliminary version of the public dataset for the Agentic RAG Legal Challenge.
+
+This version is not complete yet: it doesn’t include all questions or all supporting documents. That said, it’s fully usable, and you can already start experimenting with it. You’ll be able to test your pipelines, see what kind of tasks we’re working with, and get a clearer sense of what will be evaluated and how.
+
+Important: this is only a preliminary dataset. Most of these questions will likely remain in the final public dataset, but the official and complete public version will be released on March 11.
+
+Questions: https://platform.agentic-challenge.ai/files/data/public_dataset.json
+Source files: https://platform.agentic-challenge.ai/files/data/dataset_documents.zip
+
+Feel free to start exploring and testing — more updates coming soon!
+As a member of the AlphaCorp AI team, I am asking members of the RAGdolls team, on how they are achieving 16ms TTFT ? lol

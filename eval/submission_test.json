@@ -1,0 +1,16 @@
+{
+  "answers": [
+    {
+      "question_id": "1",
+      "answer": null,
+      "retrieved_chunk_ids": [],
+      "telemetry": {
+        "ttft": 0.061600000094585994,
+        "latency": 0.0629000001026725,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "retrieved_chunks": []
+      }
+    }
+  ]
+}
